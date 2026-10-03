@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-10-04
+
+First public version.
 
 ### Added
 - Clearer reasons when a channel won't open: an expired subscription, or
