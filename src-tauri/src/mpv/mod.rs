@@ -24,6 +24,7 @@
 //!   `state_tx` so the frontend can listen.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -37,6 +38,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::err;
 use crate::error::Result;
+use crate::sources::stream_url;
 
 pub mod hwnd;
 
@@ -91,41 +93,80 @@ pub struct Mpv {
     tx: mpsc::UnboundedSender<CommandSubmission>,
     state: Arc<Mutex<MpvState>>,
     request_id: Arc<AtomicU64>,
-    child_pid: u32,
+}
+
+/// Audio settings to start a fresh mpv instance with.
+#[derive(Debug, Clone, Copy)]
+pub struct InitialAudio {
+    /// mpv units, 0..100.
+    pub volume: f64,
+    pub muted: bool,
+}
+
+impl Default for InitialAudio {
+    fn default() -> Self {
+        Self { volume: 80.0, muted: false }
+    }
 }
 
 impl Mpv {
     /// Spawn mpv parented to the given HWND. Returns the handle plus a
     /// receiver the caller drains to forward state updates to the frontend.
+    ///
+    /// `bundled` is the mpv.exe shipped inside the installer, if any; it
+    /// wins over a system install so every user runs the version we tested.
+    /// `audio` seeds volume/mute so a respawn after a crash doesn't come
+    /// back at mpv's default 100% volume.
     pub async fn spawn(
         hwnd: isize,
+        bundled: Option<&Path>,
+        audio: InitialAudio,
     ) -> Result<(Self, mpsc::UnboundedReceiver<MpvState>)> {
-        let pipe_name = format!(r"\\.\pipe\lumen-mpv-{}", std::process::id());
-        let mpv_path = find_mpv_exe().ok_or_else(|| {
-            err!("mpv.exe not found. Install mpv from https://mpv.io and ensure it's on PATH or in Program Files.")
+        // Unique per spawn: a respawn must not collide with a pipe the
+        // previous (dying) instance may still hold open.
+        static SPAWN_SEQ: AtomicU64 = AtomicU64::new(0);
+        let pipe_name = format!(
+            r"\\.\pipe\lumen-mpv-{}-{}",
+            std::process::id(),
+            SPAWN_SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        let mpv_path = find_mpv_exe(bundled).ok_or_else(|| {
+            err!("mpv.exe not found. Reinstall Lumen, or install mpv from https://mpv.io.")
         })?;
 
-        // Core embedding flags. See https://mpv.io/manual/stable/#options.
+        let mut cmd = std::process::Command::new(&mpv_path);
+        cmd.arg(format!("--wid={}", hwnd))
+            .arg(format!("--input-ipc-server={}", pipe_name))
+            .arg(format!("--volume={}", audio.volume.clamp(0.0, 100.0)))
+            .arg(format!("--mute={}", if audio.muted { "yes" } else { "no" }));
+
         // mpv logs diagnostics via `--log-file` rather than stderr — on
         // Windows, a std::process::Command with Stdio::inherit routes to
         // the parent's actual console handle, which pnpm/Tauri's dev
-        // pipeline never attaches, so we lose every line. A log file is
-        // trivial to tail and survives crashes.
-        let log_path = std::env::temp_dir().join("lumen-mpv.log");
-        let child = std::process::Command::new(&mpv_path)
-            .arg(format!("--wid={}", hwnd))
-            .arg(format!("--input-ipc-server={}", pipe_name))
-            .arg(format!("--log-file={}", log_path.display()))
+        // pipeline never attaches, so we lose every line. The log is
+        // verbose and contains full stream URLs (credentials included), so
+        // release builds only write it when LUMEN_MPV_LOG is set — support
+        // can ask a user to turn it on.
+        if cfg!(debug_assertions) || std::env::var_os("LUMEN_MPV_LOG").is_some() {
+            let log_path = std::env::temp_dir().join("lumen-mpv.log");
+            cmd.arg(format!("--log-file={}", log_path.display()))
+                .arg("--msg-level=all=v");
+            tracing::info!(target: "lumen_lib", "mpv log file: {}", log_path.display());
+        }
+
+        // Hardware decoding in copy-back mode: frames are decoded on the
+        // GPU, then copied to system memory and presented through exactly
+        // the same path as software decoding. Direct d3d11va presentation
+        // has shown black rects under the WebView2 host, but copy-back
+        // never touches that path, and takes 4K HEVC off the CPU.
+        // LUMEN_HWDEC overrides for troubleshooting (e.g. `no`).
+        let hwdec = std::env::var("LUMEN_HWDEC").unwrap_or_else(|_| "auto-copy-safe".into());
+
+        let child = cmd
             .arg("--idle=yes")
             .arg("--force-window=yes")
             .arg("--keep-open=yes")
-            // Hardware decode is intentionally OFF. On Windows, a child HWND
-            // parented under a WebView2 host does not composite d3d11va
-            // swap-chains reliably — you get a black rect even though mpv
-            // thinks it's decoding fine. Software decode is plenty fast for
-            // 1080p and can be upgraded later behind a user toggle once we
-            // confirm the embedding path itself is stable.
-            .arg("--hwdec=no")
+            .arg(format!("--hwdec={}", hwdec))
             // D3D11 swap chain via DXGI. OpenGL + WGL looks like it works
             // (mpv logs "first video frame shown", presents into the HWND's
             // DC) but DWM doesn't composite the result when the parent
@@ -156,20 +197,17 @@ impl Mpv {
             // recent Chrome — cheap, ubiquitous, and legitimate since the
             // user has a paid subscription.
             .arg("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-            // Verbose so the log file actually tells us *why* things fail.
-            .arg("--msg-level=all=v")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| err!("failed to spawn mpv ({}): {}", mpv_path, e))?;
-        tracing::info!(target: "lumen_lib", "mpv log file: {}", log_path.display());
+            .map_err(|e| err!("failed to spawn mpv ({}): {}", mpv_path.display(), e))?;
+        job::adopt(&child);
 
-        let child_pid = child.id();
         tracing::info!(
             target: "lumen_lib",
-            "spawned mpv pid={} wid={} pipe={}",
-            child_pid, hwnd, pipe_name
+            "spawned mpv {} pid={} wid={} pipe={}",
+            mpv_path.display(), child.id(), hwnd, pipe_name
         );
 
         // mpv takes ~100ms to bind its named pipe.
@@ -189,7 +227,6 @@ impl Mpv {
             tx: cmd_tx,
             state,
             request_id: Arc::new(AtomicU64::new(1)),
-            child_pid,
         };
 
         // Register observers so every property we care about pushes events.
@@ -207,17 +244,20 @@ impl Mpv {
         self.tx
             .send(CommandSubmission { payload: line, id, reply: tx })
             .map_err(|_| err!("mpv IPC task gone"))?;
+        // Errors name only the command, never its arguments: `loadfile`'s
+        // argument is a stream URL that usually embeds credentials.
+        let name = args.first().and_then(|v| v.as_str()).unwrap_or("?");
         match tokio::time::timeout(Duration::from_secs(10), rx).await {
             Ok(Ok(v)) => {
                 if let Some(err) = v.get("error").and_then(|x| x.as_str()) {
                     if err != "success" {
-                        return Err(err!("mpv error on {:?}: {}", args, err));
+                        return Err(err!("mpv error on {}: {}", name, err));
                     }
                 }
                 Ok(v)
             }
             Ok(Err(_)) => Err(err!("mpv IPC reply channel dropped")),
-            Err(_) => Err(err!("mpv IPC timeout on {:?}", args)),
+            Err(_) => Err(err!("mpv IPC timeout on {}", name)),
         }
     }
 
@@ -227,7 +267,13 @@ impl Mpv {
     }
 
     pub async fn load(&self, url: &str, start_seconds: Option<f64>) -> Result<()> {
-        tracing::info!(target: "lumen_lib", "mpv load url={} start={:?}", url, start_seconds);
+        stream_url::validate(url)?;
+        tracing::info!(
+            target: "lumen_lib",
+            "mpv load url={} start={:?}",
+            stream_url::redact(url),
+            start_seconds
+        );
         let args: Vec<Value> = if let Some(t) = start_seconds.filter(|t| *t > 1.0) {
             // Options dict applied before the first frame — `start=` resumes.
             vec![
@@ -288,8 +334,15 @@ impl Mpv {
         self.state.lock().await.clone()
     }
 
-    pub fn pid(&self) -> u32 {
-        self.child_pid
+    /// False once the IPC task has exited — mpv quit, crashed, or the pipe
+    /// broke. Callers respawn rather than keep talking to a dead handle.
+    pub fn is_alive(&self) -> bool {
+        !self.tx.is_closed()
+    }
+
+    /// Whether two handles refer to the same spawned process.
+    pub fn same_instance(&self, other: &Mpv) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
     }
 
     async fn observe_properties(&self) -> Result<()> {
@@ -315,12 +368,6 @@ impl Mpv {
             .await?;
         }
         Ok(())
-    }
-
-    /// Ask mpv to quit. The pipe task will exit on its own when the pipe
-    /// closes; it also reaps the child process.
-    pub async fn shutdown(&self) {
-        let _ = self.command(&[json!("quit")]).await;
     }
 }
 
@@ -504,38 +551,60 @@ async fn connect_pipe(name: &str) -> Result<NamedPipeClient> {
     Err(err!("mpv IPC pipe {} never appeared", name))
 }
 
-// ---- mpv.exe discovery ----
+fn find_mpv_exe(bundled: Option<&Path>) -> Option<PathBuf> {
+    bundled
+        .filter(|p| p.is_file())
+        .map(Path::to_path_buf)
+        .or_else(crate::players::find_system_mpv)
+}
 
-fn find_mpv_exe() -> Option<String> {
-    // `MPV Player` is the folder the shinchiro winget installer uses (via
-    // the 0GMou/mpv2winget wrapper). Plain `mpv` is what `choco install mpv`
-    // and some manual zips drop.
-    const DIRECT: &[&str] = &[
-        r"C:\Program Files\mpv\mpv.exe",
-        r"C:\Program Files (x86)\mpv\mpv.exe",
-        r"C:\Program Files\MPV Player\mpv.exe",
-        r"C:\Program Files (x86)\MPV Player\mpv.exe",
-    ];
-    for p in DIRECT {
-        if std::path::Path::new(p).exists() {
-            return Some((*p).to_string());
+// ---- process lifetime ----
+
+/// Ties mpv's lifetime to ours. Every mpv we spawn is put in a Windows job
+/// object with KILL_ON_JOB_CLOSE; the job handle is held (never closed) for
+/// the life of this process, so when Lumen exits — cleanly, via a crash, or
+/// killed from Task Manager — the OS closes the handle and kills mpv too.
+/// Without this an orphaned mpv.exe can keep playing audio after Lumen is
+/// gone.
+mod job {
+    use std::os::windows::io::AsRawHandle;
+    use std::sync::OnceLock;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    fn job() -> Option<HANDLE> {
+        // HANDLE isn't Send/Sync, so park the raw value.
+        static JOB: OnceLock<Option<isize>> = OnceLock::new();
+        let raw = JOB.get_or_init(|| unsafe {
+            let job = CreateJobObjectW(None, PCWSTR::null()).ok()?;
+            let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                &info as *const _ as *const _,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+            .ok()?;
+            Some(job.0 as isize)
+        });
+        raw.map(|h| HANDLE(h as *mut _))
+    }
+
+    pub fn adopt(child: &std::process::Child) {
+        let Some(job) = job() else {
+            tracing::warn!(target: "lumen_lib", "could not create job object; mpv may outlive Lumen");
+            return;
+        };
+        let process = HANDLE(child.as_raw_handle());
+        if let Err(e) = unsafe { AssignProcessToJobObject(job, process) } {
+            tracing::warn!(target: "lumen_lib", "AssignProcessToJobObject failed: {}", e);
         }
     }
-    for env_var in ["LOCALAPPDATA", "APPDATA"] {
-        if let Ok(base) = std::env::var(env_var) {
-            let p = format!(r"{}\mpv\mpv.exe", base);
-            if std::path::Path::new(&p).exists() {
-                return Some(p);
-            }
-        }
-    }
-    if let Ok(path) = std::env::var("PATH") {
-        for dir in path.split(';').filter(|d| !d.is_empty()) {
-            let full = std::path::Path::new(dir).join("mpv.exe");
-            if full.exists() {
-                return Some(full.to_string_lossy().into_owned());
-            }
-        }
-    }
-    None
 }

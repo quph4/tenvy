@@ -8,8 +8,10 @@ pub enum Error {
     Msg(String),
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
+    /// Built via the `From` impl below, which strips the request URL —
+    /// reqwest includes it in `Display`, and our URLs carry credentials.
     #[error(transparent)]
-    Http(#[from] reqwest::Error),
+    Http(reqwest::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -24,6 +26,12 @@ pub enum Error {
     SerdeJson(#[from] serde_json::Error),
     #[error(transparent)]
     Anyhow(#[from] anyhow::Error),
+}
+
+impl From<reqwest::Error> for Error {
+    fn from(e: reqwest::Error) -> Self {
+        Error::Http(e.without_url())
+    }
 }
 
 impl Serialize for Error {

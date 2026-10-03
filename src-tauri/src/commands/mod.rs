@@ -447,8 +447,7 @@ pub async fn current_programme(
 // ---------- external player ----------
 
 /// Hand a stream URL to a locally-installed external player (mpv preferred,
-/// then VLC). This is the escape hatch for streams WebView2 can't decode
-/// — HEVC/H.265 video, AC-3/EAC-3 audio, and the like.
+/// then VLC) — the escape hatch when the user wants a standalone window.
 ///
 /// Returns the path of the player that was launched so we can report it
 /// back to the user.
@@ -458,96 +457,62 @@ pub async fn open_external(
     audio_track: Option<i64>,
     subtitle_track: Option<i64>,
 ) -> Result<String> {
+    // The URL comes from a provider's playlist. Validation guarantees it's
+    // a network URL (so it can't be read as a `--option`), and mpv also
+    // gets an explicit `--` before it.
+    crate::sources::stream_url::validate(&url)?;
     tokio::task::spawn_blocking(move || -> Result<String> {
-        let player = find_external_player().ok_or_else(|| {
-            err!("No external player found. Install mpv (https://mpv.io) or VLC and try again.")
-        })?;
+        let (player, is_mpv) = match crate::players::find_system_mpv() {
+            Some(p) => (p, true),
+            None => (
+                crate::players::find_vlc().ok_or_else(|| {
+                    err!("No external player found. Install mpv (https://mpv.io) or VLC and try again.")
+                })?,
+                false,
+            ),
+        };
 
-        // mpv and VLC both take the same MKV track number we collected
-        // from the container probe, just via different flags. Choose by
-        // executable name so a user's preferred player gets the right
-        // argument shape.
-        let is_mpv = player.to_lowercase().contains("mpv");
+        // Track ids are mpv's aid/sid: 1-based within each track type.
         let mut cmd = std::process::Command::new(&player);
         if is_mpv {
             if let Some(a) = audio_track {
                 cmd.arg(format!("--aid={}", a));
             }
-            if let Some(s) = subtitle_track {
-                cmd.arg(format!("--sid={}", s));
-            } else {
-                // Explicit --sid=no so mpv doesn't auto-pick a sub when
-                // the user chose "Off" in Lumen.
-                cmd.arg("--sid=no");
-            }
+            match subtitle_track {
+                Some(s) => cmd.arg(format!("--sid={}", s)),
+                // Explicit --sid=no so mpv doesn't auto-pick a sub when the
+                // user chose "Off" in Lumen.
+                None => cmd.arg("--sid=no"),
+            };
+            cmd.arg("--");
         } else {
-            // VLC. Its track-id flags are 1-based and line up with the
-            // MKV TrackNumber we pass through.
+            // VLC's track flags are 0-based indexes within the type.
             if let Some(a) = audio_track {
-                cmd.arg(format!("--audio-track={}", a));
+                cmd.arg(format!("--audio-track={}", a - 1));
             }
-            if let Some(s) = subtitle_track {
-                cmd.arg(format!("--sub-track={}", s));
-            } else {
-                cmd.arg("--no-sub-autodetect-file");
-                cmd.arg("--sub-track=-1");
+            match subtitle_track {
+                Some(s) => {
+                    cmd.arg(format!("--sub-track={}", s - 1));
+                }
+                None => {
+                    cmd.arg("--no-sub-autodetect-file").arg("--sub-track=-1");
+                }
             }
         }
         cmd.arg(&url)
             .spawn()
-            .map_err(|e| err!("Failed to launch {}: {}", player, e))?;
+            .map_err(|e| err!("Failed to launch {}: {}", player.display(), e))?;
         tracing::info!(
             target: "lumen_lib",
-            "launched external player: {} (aid={:?}, sid={:?})",
-            player, audio_track, subtitle_track
+            "launched external player: {} url={} (aid={:?}, sid={:?})",
+            player.display(),
+            crate::sources::stream_url::redact(&url),
+            audio_track,
+            subtitle_track
         );
-        Ok(player)
+        Ok(player.to_string_lossy().into_owned())
     })
     .await?
-}
-
-fn find_external_player() -> Option<String> {
-    // Prefer mpv: lighter, better IPTV handling, fewer UI distractions.
-    const DIRECT_CANDIDATES: &[&str] = &[
-        r"C:\Program Files\mpv\mpv.exe",
-        r"C:\Program Files (x86)\mpv\mpv.exe",
-        r"C:\Program Files\MPV Player\mpv.exe",
-        r"C:\Program Files (x86)\MPV Player\mpv.exe",
-        r"C:\Program Files\VideoLAN\VLC\vlc.exe",
-        r"C:\Program Files (x86)\VideoLAN\VLC\vlc.exe",
-    ];
-    for p in DIRECT_CANDIDATES {
-        if std::path::Path::new(p).exists() {
-            return Some((*p).to_string());
-        }
-    }
-    // Per-user mpv installs sometimes land under APPDATA / LOCALAPPDATA.
-    for env_var in ["LOCALAPPDATA", "APPDATA"] {
-        if let Ok(base) = std::env::var(env_var) {
-            let p = format!(r"{}\mpv\mpv.exe", base);
-            if std::path::Path::new(&p).exists() {
-                return Some(p);
-            }
-        }
-    }
-    // PATH lookup as a final fallback.
-    for exe in ["mpv.exe", "vlc.exe"] {
-        if let Some(found) = lookup_on_path(exe) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-fn lookup_on_path(exe: &str) -> Option<String> {
-    let path = std::env::var("PATH").ok()?;
-    for dir in path.split(';').filter(|d| !d.is_empty()) {
-        let full = std::path::Path::new(dir).join(exe);
-        if full.exists() {
-            return Some(full.to_string_lossy().into_owned());
-        }
-    }
-    None
 }
 
 // ---------- diagnostics ----------

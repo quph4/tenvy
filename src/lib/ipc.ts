@@ -184,7 +184,7 @@ export async function onMpvState(handler: (s: MpvState) => void): Promise<Unlist
  * one-shot signals — the native mpv HWND captures pointer events before
  * WebView2 sees them, so we get them back through this side channel.
  */
-export type MpvEvent = { kind: 'double-click' }
+export type MpvEvent = { kind: 'double-click' } | { kind: 'crashed' }
 export async function onMpvEvent(handler: (e: MpvEvent) => void): Promise<UnlistenFn> {
   return listen<MpvEvent>('mpv://event', (e) => handler(e.payload))
 }

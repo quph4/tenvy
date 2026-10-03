@@ -233,12 +233,30 @@ export function Player() {
   // them, so an HTML `onDoubleClick` on the video div never fires; instead
   // the child window's wnd_proc catches WM_LBUTTONDBLCLK and Rust emits
   // `mpv://event`.
+  //
+  // `crashed` means the mpv process died. The next IPC call respawns it, so
+  // reload the current channel from where it was — but only once per
+  // channel per 30s, so a stream that reliably crashes mpv can't loop.
+  const lastCrashReload = useRef<{ channelId: number; at: number } | null>(null)
   useEffect(() => {
     let unlisten: (() => void) | null = null
     onMpvEvent((ev) => {
       if (ev.kind === 'double-click') {
         const { fullscreen, setFullscreen } = usePlayback.getState()
         setFullscreen(!fullscreen)
+      } else if (ev.kind === 'crashed') {
+        const { channel, timePos } = usePlayback.getState()
+        const prev = lastCrashReload.current
+        if (!channel || (prev?.channelId === channel.id && Date.now() - prev.at < 30_000)) {
+          push('error', 'The player stopped unexpectedly.')
+          return
+        }
+        lastCrashReload.current = { channelId: channel.id, at: Date.now() }
+        push('info', 'The player stopped unexpectedly — restarting…')
+        const isVodNow = channel.kind === 'movie' || channel.kind === 'series'
+        ipc
+          .mpvLoad(channel.streamUrl, isVodNow ? timePos : null)
+          .catch((e) => push('error', `Playback failed: ${String(e).replace(/^Error:\s*/, '')}`))
       }
     })
       .then((fn) => {
@@ -248,7 +266,7 @@ export function Player() {
     return () => {
       unlisten?.()
     }
-  }, [])
+  }, [push])
 
   const audioOptions: TrackOption[] = audioTracks.map((t, i) => ({
     id: String(t.id),

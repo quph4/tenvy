@@ -2,12 +2,13 @@ mod commands;
 mod db;
 mod error;
 mod models;
+mod players;
 mod sources;
 
 #[cfg(windows)]
 mod mpv;
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use commands::AppState;
