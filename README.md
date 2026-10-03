@@ -46,10 +46,11 @@ the bundled mpv on first run. Failures on demand:
 `/__control?drop=1 | stall=1 | fail=3 | down=1 | expired=1 | max=2 | reset=1`
 (see `scripts/test-provider/server.mjs`).
 
-Run the app against a separate library so tests never touch your own:
+Run the app against a separate library so tests never touch your own
+(PowerShell):
 
 ```
-TENVY_DATA_DIR=%TEMP%	envy-test WEBVIEW2_USER_DATA_FOLDER=%TEMP%	envy-test\webview pnpm tauri dev
+$env:TENVY_DATA_DIR = "$env:TEMP\tenvy-test"; $env:WEBVIEW2_USER_DATA_FOLDER = "$env:TEMP\tenvy-test\webview"; pnpm tauri dev
 ```
 
 (`TENVY_DATA_DIR` only works in development builds.) Then connect with
