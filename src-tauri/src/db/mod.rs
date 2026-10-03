@@ -1,3 +1,4 @@
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -151,31 +152,78 @@ pub fn touch_source(db: &Db, id: i64) -> Result<()> {
 
 // ---------- channels ----------
 
-/// Wholesale replace every channel for a source. Called from ingestion.
+/// Sync a source's channel rows with a freshly ingested list.
+///
+/// Rows are matched on `channel_key` and updated in place so their ids —
+/// and therefore favorites and watch history, which hang off `channels.id`
+/// with ON DELETE CASCADE — survive a refresh. Only channels that are no
+/// longer in the playlist are deleted. Duplicate keys (the same stream
+/// listed under two groups) pair up with existing rows in id order.
 pub fn replace_channels(db: &Db, source_id: i64, channels: &[ChannelInsert]) -> Result<usize> {
     let mut conn = db.lock().unwrap();
     let tx = conn.transaction()?;
-    tx.execute("DELETE FROM channels WHERE source_id = ?1", [source_id])?;
+
+    let mut existing: HashMap<String, VecDeque<i64>> = HashMap::new();
     {
-        let mut stmt = tx.prepare(
+        let mut stmt =
+            tx.prepare("SELECT id, stream_url FROM channels WHERE source_id = ?1 ORDER BY id")?;
+        let rows = stmt.query_map([source_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        for row in rows {
+            let (id, url) = row?;
+            existing.entry(channel_key(&url)).or_default().push_back(id);
+        }
+    }
+
+    {
+        let mut update = tx.prepare(
+            "UPDATE channels
+                SET tvg_id = ?2, name = ?3, logo = ?4, group_name = ?5,
+                    stream_url = ?6, sort_order = ?7, kind = ?8
+              WHERE id = ?1",
+        )?;
+        let mut insert = tx.prepare(
             "INSERT INTO channels(source_id, tvg_id, name, logo, group_name, stream_url, sort_order, kind)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         )?;
         for (i, c) in channels.iter().enumerate() {
-            stmt.execute(params![
-                source_id,
-                c.tvg_id,
-                c.name,
-                c.logo,
-                c.group,
-                c.stream_url,
-                i as i64,
-                c.kind,
-            ])?;
+            let reuse = existing
+                .get_mut(&channel_key(&c.stream_url))
+                .and_then(|ids| ids.pop_front());
+            match reuse {
+                Some(id) => {
+                    update.execute(params![
+                        id, c.tvg_id, c.name, c.logo, c.group, c.stream_url, i as i64, c.kind,
+                    ])?;
+                }
+                None => {
+                    insert.execute(params![
+                        source_id, c.tvg_id, c.name, c.logo, c.group, c.stream_url, i as i64, c.kind,
+                    ])?;
+                }
+            }
         }
     }
+
+    {
+        let mut delete = tx.prepare("DELETE FROM channels WHERE id = ?1")?;
+        for id in existing.into_values().flatten() {
+            delete.execute([id])?;
+        }
+    }
+
     tx.commit()?;
     Ok(channels.len())
+}
+
+/// Identity of a channel across refreshes. Xtream URLs embed the account's
+/// host, username and password, any of which can change (providers rotate
+/// DNS, users reset passwords) without the stream itself changing — so for
+/// those we key on `{kind}/{stream_id}`. Everything else keys on the URL.
+fn channel_key(stream_url: &str) -> String {
+    match crate::sources::xtream::parse_xtream_url(stream_url) {
+        Some(x) => format!("xtream:{}/{}", x.kind, x.stream_id),
+        None => stream_url.to_string(),
+    }
 }
 
 pub struct ChannelInsert {
@@ -467,6 +515,13 @@ pub fn upsert_programmes(db: &Db, items: &[Programme]) -> Result<usize> {
             stmt.execute(params![p.channel_tvg_id, p.start, p.stop, p.title, p.description])?;
         }
     }
+    // Programmes are only ever upserted, so without pruning every XMLTV
+    // refresh grows the table forever. The guide shows at most a couple of
+    // hours of the past; keep a day for slack.
+    tx.execute(
+        "DELETE FROM programmes WHERE stop < strftime('%s','now') - 86400",
+        [],
+    )?;
     tx.commit()?;
     Ok(items.len())
 }
@@ -530,4 +585,81 @@ pub fn current_programme(db: &Db, tvg_id: &str) -> Result<Option<Programme>> {
         )
         .optional()?;
     Ok(row)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Db {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA_SQL).unwrap();
+        migrate(&conn).unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn ch(name: &str, url: &str) -> ChannelInsert {
+        ChannelInsert {
+            tvg_id: None,
+            name: name.into(),
+            logo: None,
+            group: Some("G".into()),
+            stream_url: url.into(),
+            kind: "live".into(),
+        }
+    }
+
+    fn id_of(db: &Db, name: &str) -> i64 {
+        db.lock()
+            .unwrap()
+            .query_row("SELECT id FROM channels WHERE name = ?1", [name], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn refresh_keeps_favorites_and_history() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, &[ch("A", "http://h/a"), ch("B", "http://h/b")]).unwrap();
+        let a = id_of(&db, "A");
+        toggle_favorite(&db, a).unwrap();
+        upsert_watch_progress(&db, a, 100.0, 1000.0, false).unwrap();
+
+        // Refresh: A renamed and moved, B dropped, C added.
+        replace_channels(&db, sid, &[ch("C", "http://h/c"), ch("A2", "http://h/a")]).unwrap();
+
+        assert_eq!(id_of(&db, "A2"), a, "existing channel keeps its id");
+        assert_eq!(list_favorites(&db).unwrap().len(), 1);
+        assert!(get_watch_entry(&db, a).unwrap().is_some());
+        let names: Vec<String> = list_channels(&db, Some(sid), None, None)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+        assert_eq!(names, vec!["C", "A2"]);
+    }
+
+    #[test]
+    fn xtream_identity_survives_credential_change() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, &[ch("M", "http://old.host/movie/u/oldpw/42.mkv")]).unwrap();
+        let m = id_of(&db, "M");
+        toggle_favorite(&db, m).unwrap();
+
+        replace_channels(&db, sid, &[ch("M", "http://new.host:8080/movie/u/newpw/42.mkv")]).unwrap();
+
+        assert_eq!(id_of(&db, "M"), m);
+        assert_eq!(list_favorites(&db).unwrap()[0].stream_url, "http://new.host:8080/movie/u/newpw/42.mkv");
+    }
+
+    #[test]
+    fn duplicate_urls_are_kept_as_separate_rows() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        let list = [ch("A", "http://h/a"), ch("A again", "http://h/a")];
+        replace_channels(&db, sid, &list).unwrap();
+        replace_channels(&db, sid, &list).unwrap();
+        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 2);
+    }
 }

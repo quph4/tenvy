@@ -213,9 +213,8 @@ pub struct XtreamUrl {
     pub host: String,
     pub username: String,
     pub password: String,
-    /// "movie" | "series" | "live" — kept for future dispatch (e.g. routing
-    /// series URLs to get_series_info once we store series_id).
-    #[allow(dead_code)]
+    /// "movie" | "series" | "live". Part of a channel's stable identity
+    /// across refreshes (see `db::channel_key`).
     pub kind: String,
     pub stream_id: i64,
 }
