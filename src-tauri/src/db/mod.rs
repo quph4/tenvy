@@ -1021,19 +1021,43 @@ pub fn source_stats(db: &Db, source_id: i64) -> Result<SourceStats> {
     let conn = db.read();
     let mut stats = SourceStats::default();
     let mut stmt = conn.prepare(
-        "SELECT kind, COUNT(*) FROM channels WHERE source_id = ?1 AND parent_id IS NULL GROUP BY kind",
+        "SELECT kind, COUNT(*) FROM channels WHERE source_id = ?1 AND parent_id IS NULL AND kind != 'live' GROUP BY kind",
     )?;
     let rows = stmt.query_map([source_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
     for row in rows {
         let (kind, n) = row?;
         match kind.as_str() {
-            "live" => stats.live = n,
             "movie" => stats.movies = n,
             "series" => stats.series = n,
             _ => {}
         }
     }
+    // Live channels without the provider's section titles ("-= Sweden =-").
+    let mut stmt = conn.prepare("SELECT name FROM channels WHERE source_id = ?1 AND parent_id IS NULL AND kind = 'live'")?;
+    let names = stmt.query_map([source_id], |r| r.get::<_, String>(0))?;
+    for name in names {
+        if !is_section_title(&name?) {
+            stats.live += 1;
+        }
+    }
     Ok(stats)
+}
+
+/// Provider "channels" that are really headings in the list: no letters
+/// or digits, or a title wrapped in decoration ("-= Sweden =-",
+/// "##### SPORT #####"). Mirrors isSeparator in src/lib/channels.ts.
+pub fn is_section_title(name: &str) -> bool {
+    const DECOR: &str = " \t#=-*~|_.•·★☆◆◇►◄▶◀<>+:";
+    let name = name.trim();
+    if !name.chars().any(char::is_alphanumeric) {
+        return true;
+    }
+    let lead = name.chars().take_while(|c| DECOR.contains(*c)).count();
+    let trail = name.chars().rev().take_while(|c| DECOR.contains(*c)).count();
+    let nonspace = |s: &str| s.chars().filter(|c| !c.is_whitespace()).count();
+    let head: String = name.chars().take(lead).collect();
+    let tail: String = name.chars().rev().take(trail).collect();
+    nonspace(&head) >= 2 && nonspace(&tail) >= 2
 }
 
 // ---------- app meta ----------
@@ -1427,5 +1451,15 @@ mod tests {
         assert_eq!(names(list_favorites(&db, true).unwrap()), ["A", "B", "C"]);
         reorder_favorites(&db, &[c, a]).unwrap();
         assert_eq!(names(list_favorites(&db, true).unwrap()), ["C", "A", "B"]);
+    }
+
+    #[test]
+    fn section_titles() {
+        for t in ["-= Sweden =-", "##### SPORT #####", "---- UK ----", "★★ Kids ★★", "====="] {
+            assert!(is_section_title(t), "{t}");
+        }
+        for c in ["SVT1 HD SE", "|SE| SVT1", "C+ Sport", "4K: Nature", "N1 Info & Updates SE"] {
+            assert!(!is_section_title(c), "{c}");
+        }
     }
 }

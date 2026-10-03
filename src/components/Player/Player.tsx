@@ -16,6 +16,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { useVideoObscured } from '../../hooks/useVideoObscured'
 import { rememberLastChannel, useTvPrefs } from '../../stores/tvPrefs'
 import { osd, showChannelInfo } from '../../lib/osd'
+import { usePlaylist } from '../../stores/playlist'
+import { daysLeft, useAccounts } from '../../stores/accounts'
 
 const DRAWER_WIDTH = 288 // px — tailwind w-72
 /** Wait before retrying a stream that failed to open. */
@@ -150,7 +152,8 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
       const wait = BACKOFF_MS[attempts++]
       lastReconnect = Date.now()
       recovering = true
-      osd(attempts === 1 ? 'Connection lost — reconnecting…' : `Reconnecting… (attempt ${attempts})`, wait + 4000)
+      const of = `${attempts}/${BACKOFF_MS.length}`
+      osd(attempts === 1 ? `Connection lost — reconnecting (${of})…` : `Reconnecting (${of})…`, wait + 4000)
       reopenAfter(wait)
     }
 
@@ -169,11 +172,7 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
         // the panel answers with an empty page.
         push('error', `Your provider has no recording of "${s.catchup.title}" on ${s.channel.name}.`)
       } else {
-        push(
-          'error',
-          `Couldn't open ${s.channel.name}${s.lastError ? ` (${s.lastError})` : ''}. ` +
-            'If your provider allows one connection at a time, close any other player using it.',
-        )
+        explainOpenFailure(s.channel, s.lastError).then((msg) => push('error', msg))
       }
     }
 
@@ -225,6 +224,31 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
       unsubscribe()
     }
   }, [push])
+}
+
+/**
+ * Why a stream won't open, in words: ask the provider about the account
+ * (expired, connections in use) before falling back to the generic hint.
+ */
+async function explainOpenFailure(channel: Channel, lastError: string | null): Promise<string> {
+  const source = usePlaylist.getState().sources.find((s) => s.id === channel.sourceId)
+  if (source) {
+    await useAccounts.getState().load(source).catch(() => {})
+    const info = useAccounts.getState().bySource[source.id]
+    const left = daysLeft(info)
+    if (info && ((left != null && left < 0) || (info.status && !/^active$/i.test(info.status)))) {
+      return `Your ${source.name} subscription is ${left != null && left < 0 ? 'expired' : info.status?.toLowerCase()}. Renew it with your provider to keep watching.`
+    }
+    if (info?.maxConnections != null && (info.activeConnections ?? 0) >= info.maxConnections) {
+      return info.maxConnections === 1
+        ? `Your ${source.name} account allows one stream at a time, and another player is using it. Close it and try again.`
+        : `All ${info.maxConnections} connections on your ${source.name} account are in use. Close another player and try again.`
+    }
+  }
+  return (
+    `Couldn't open ${channel.name}${lastError ? ` (${lastError})` : ''}. ` +
+    'If your provider allows one connection at a time, close any other player using it.'
+  )
 }
 
 /**

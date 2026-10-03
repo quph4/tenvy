@@ -61,10 +61,13 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let dir = app
-                .path()
-                .app_data_dir()
-                .expect("app data dir");
+            // Development builds can run against a separate data folder
+            // (TENVY_DATA_DIR), e.g. with the local test provider, without
+            // touching the real library.
+            let dir = std::env::var_os("TENVY_DATA_DIR")
+                .filter(|_| cfg!(debug_assertions))
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| app.path().app_data_dir().expect("app data dir"));
             let db_path = dir.join("tenvy.db");
             let db = db::open(&db_path).expect("open db");
             app.manage(AppState::new(db));

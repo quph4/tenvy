@@ -50,8 +50,6 @@ function App() {
     useParental.getState().refresh().catch(() => {})
     hydrate()
       .then(async () => {
-        // Subscription status for Home and Settings (and an expiry warning).
-        useAccounts.getState().loadAll(usePlaylist.getState().sources).catch(() => {})
         // Optionally pick up where the viewer left off, like a TV.
         const id = lastChannelId()
         if (!useTvPrefs.getState().startWithLastChannel || id == null) return
@@ -82,6 +80,11 @@ function App() {
   useEffect(() => startUpdateChecks(), [])
   useEffect(() => startReminderScheduler(), [])
   useEffect(() => startAppInfo(), [])
+  // Subscription details for every provider, also one added just now.
+  const sourceIds = sources.map((s) => s.id).join(',')
+  useEffect(() => {
+    if (sourceIds) useAccounts.getState().loadAll(usePlaylist.getState().sources).catch(() => {})
+  }, [sourceIds])
   useEffect(() => startToastMirror(), [])
   const support = useAppInfo((s) => s.info?.config.support ?? null)
 

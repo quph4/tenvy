@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Clearer reasons when a channel won't open: an expired subscription, or
+  every allowed connection in use, straight from your provider. Reconnect
+  attempts are counted on screen (1/5, 2/5…).
 - Automatic reconnect: when a stream drops, stalls or ends early, Tenvy
   reopens it (films at the same spot) with growing pauses, and asks
   after five tries in a row.
