@@ -26,7 +26,7 @@ export function Details({ item, onBack }: { item: LibraryItem; onBack(): void })
   const rating = details.data?.rating ?? channel?.rating ?? null
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-y-auto bg-zinc-950">
+    <div className="relative min-h-0 flex-1 overflow-y-auto bg-neutral-950">
       {/* Backdrop: the artwork fades into the page. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[420px] overflow-hidden">
         {details.data?.backdrop && (
@@ -37,14 +37,14 @@ export function Details({ item, onBack }: { item: LibraryItem; onBack(): void })
             className="h-full w-full object-cover opacity-40 animate-fade-in"
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-zinc-950/40 via-zinc-950/70 to-zinc-950" />
-        <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/80 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-b from-neutral-950/40 via-neutral-950/70 to-neutral-950" />
+        <div className="absolute inset-0 bg-gradient-to-r from-neutral-950/80 to-transparent" />
       </div>
 
       <div className="relative px-8 pb-10 pt-5">
         <button
           onClick={onBack}
-          className="mb-6 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-zinc-300 hover:bg-white/10 hover:text-white"
+          className="mb-6 inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-neutral-300 hover:bg-white/10 hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
@@ -52,25 +52,25 @@ export function Details({ item, onBack }: { item: LibraryItem; onBack(): void })
 
         <div className="flex gap-8">
           <div className="w-48 shrink-0">
-            <div className="aspect-[2/3] overflow-hidden rounded-xl bg-zinc-900 shadow-2xl shadow-black/60 ring-1 ring-white/10">
+            <div className="aspect-[2/3] overflow-hidden rounded-xl bg-neutral-900 shadow-2xl shadow-black/60 ring-1 ring-white/10">
               <Poster src={poster} title={title} />
             </div>
           </div>
 
           <div className="min-w-0 flex-1 pt-2">
             <h1 className="text-3xl font-semibold tracking-tight text-white">{title}</h1>
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-400">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-neutral-400">
               {year && <span>{year}</span>}
               {details.data?.duration && <span>{details.data.duration}</span>}
               {rating ? (
-                <span className="inline-flex items-center gap-1 text-amber-300">
+                <span className="inline-flex items-center gap-1 text-accent-300">
                   <Star className="h-3.5 w-3.5 fill-current" />
                   {rating.toFixed(1)}
                 </span>
               ) : null}
               {details.data?.genre && <span>{details.data.genre}</span>}
               {tags.map((t) => (
-                <span key={t} className="rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
+                <span key={t} className="rounded border border-neutral-700 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
                   {t}
                 </span>
               ))}
@@ -83,7 +83,7 @@ export function Details({ item, onBack }: { item: LibraryItem; onBack(): void })
               {details.data?.trailer && (
                 <button
                   onClick={() => openUrl(details.data!.trailer!).catch(() => {})}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 text-sm text-zinc-200 hover:border-zinc-500"
+                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-neutral-700 bg-neutral-900/60 px-4 text-sm text-neutral-200 hover:border-neutral-500"
                 >
                   <Clapperboard className="h-4 w-4" />
                   Trailer
@@ -93,13 +93,13 @@ export function Details({ item, onBack }: { item: LibraryItem; onBack(): void })
 
             {details.loading && !details.data && (
               <div className="mt-6 max-w-2xl space-y-2">
-                <div className="h-3 w-full animate-pulse rounded bg-zinc-800/80" />
-                <div className="h-3 w-5/6 animate-pulse rounded bg-zinc-800/80" />
-                <div className="h-3 w-2/3 animate-pulse rounded bg-zinc-800/80" />
+                <div className="h-3 w-full animate-pulse rounded bg-neutral-800/80" />
+                <div className="h-3 w-5/6 animate-pulse rounded bg-neutral-800/80" />
+                <div className="h-3 w-2/3 animate-pulse rounded bg-neutral-800/80" />
               </div>
             )}
             {details.data?.plot && (
-              <p className="mt-6 max-w-2xl text-[15px] leading-relaxed text-zinc-300">{details.data.plot}</p>
+              <p className="mt-6 max-w-2xl text-[15px] leading-relaxed text-neutral-300">{details.data.plot}</p>
             )}
             <dl className="mt-5 max-w-2xl space-y-1.5 text-sm">
               {details.data?.cast && <Fact label="Cast" value={details.data.cast} />}
@@ -117,8 +117,8 @@ export function Details({ item, onBack }: { item: LibraryItem; onBack(): void })
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex gap-3">
-      <dt className="w-20 shrink-0 text-zinc-500">{label}</dt>
-      <dd className="line-clamp-2 text-zinc-300">{value}</dd>
+      <dt className="w-20 shrink-0 text-neutral-500">{label}</dt>
+      <dd className="line-clamp-2 text-neutral-300">{value}</dd>
     </div>
   )
 }
@@ -196,9 +196,9 @@ function yearOf(date: string | null | undefined): number | null {
 // -------- actions --------
 
 const primaryBtn =
-  'inline-flex h-10 items-center gap-2 rounded-lg bg-white px-5 text-sm font-semibold text-zinc-950 shadow-lg shadow-black/30 hover:bg-zinc-200'
+  'inline-flex h-10 items-center gap-2 rounded-lg bg-white px-5 text-sm font-semibold text-neutral-950 shadow-lg shadow-black/30 hover:bg-neutral-200'
 const secondaryBtn =
-  'inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 text-sm text-zinc-200 hover:border-zinc-500'
+  'inline-flex h-10 items-center gap-2 rounded-lg border border-neutral-700 bg-neutral-900/60 px-4 text-sm text-neutral-200 hover:border-neutral-500'
 
 function MovieActions({ channel }: { channel: Channel }) {
   const progress = useHistory((s) => s.progress.get(channel.id))
@@ -255,7 +255,7 @@ function FavoriteButton({ channel }: { channel: Channel }) {
   }
   return (
     <button onClick={toggle} className={secondaryBtn} aria-pressed={!!fav}>
-      <Star className={cn('h-4 w-4', fav && 'fill-amber-300 text-amber-300')} />
+      <Star className={cn('h-4 w-4', fav && 'fill-accent-300 text-accent-300')} />
       {fav ? 'In favorites' : 'Favorite'}
     </button>
   )
@@ -287,13 +287,13 @@ function Seasons({ item }: { item: Extract<LibraryItem, { type: 'show' }> }) {
     return (
       <div className="mt-10 space-y-2">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-14 animate-pulse rounded-lg bg-zinc-900/80" />
+          <div key={i} className="h-14 animate-pulse rounded-lg bg-neutral-900/80" />
         ))}
       </div>
     )
   }
   if (error && episodes.length === 0) {
-    return <p className="mt-10 text-sm text-zinc-500">Couldn't load episodes: {error}</p>
+    return <p className="mt-10 text-sm text-neutral-500">Couldn't load episodes: {error}</p>
   }
 
   return (
@@ -312,7 +312,7 @@ function Seasons({ item }: { item: Extract<LibraryItem, { type: 'show' }> }) {
               onClick={() => setSeason(s)}
               className={cn(
                 'h-8 rounded-full px-3.5 text-sm transition-colors',
-                s === shown ? 'bg-white text-zinc-950' : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800',
+                s === shown ? 'bg-white text-neutral-950' : 'bg-neutral-900 text-neutral-300 hover:bg-neutral-800',
               )}
             >
               {s > 0 ? `Season ${s}` : 'Other'}
@@ -320,7 +320,7 @@ function Seasons({ item }: { item: Extract<LibraryItem, { type: 'show' }> }) {
           ))}
       </div>
 
-      <ul className="mt-5 divide-y divide-zinc-900 overflow-hidden rounded-xl border border-zinc-900 bg-zinc-950/60">
+      <ul className="mt-5 divide-y divide-neutral-900 overflow-hidden rounded-xl border border-neutral-900 bg-neutral-950/60">
         {list.map((ep) => {
           const p = progress.get(ep.channel.id)
           const active = current?.id === ep.channel.id
@@ -330,18 +330,18 @@ function Seasons({ item }: { item: Extract<LibraryItem, { type: 'show' }> }) {
                 onClick={() => requestPlay(ep.channel)}
                 className={cn(
                   'relative flex w-full items-center gap-4 px-4 py-3 text-left transition-colors',
-                  active ? 'bg-indigo-500/10' : 'hover:bg-zinc-900/70',
+                  active ? 'bg-accent-500/10' : 'hover:bg-neutral-900/70',
                 )}
               >
-                <span className="w-10 shrink-0 text-center text-sm font-semibold tabular-nums text-zinc-500">
+                <span className="w-10 shrink-0 text-center text-sm font-semibold tabular-nums text-neutral-500">
                   {ep.episode || '–'}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm text-zinc-100">
+                  <span className="block truncate text-sm text-neutral-100">
                     {ep.subtitle ?? (ep.episode ? `Episode ${ep.episode}` : parseTitle(ep.channel.name).title)}
                   </span>
                   {isResumable(p) && (
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-neutral-500">
                       {fmtResume(p.timePos)} of {fmtResume(p.duration)}
                     </span>
                   )}
@@ -351,7 +351,7 @@ function Seasons({ item }: { item: Extract<LibraryItem, { type: 'show' }> }) {
                     Watched
                   </span>
                 )}
-                {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-indigo-400" />}
+                {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent-400" />}
                 <ProgressStripe progress={p} />
               </button>
             </li>

@@ -124,10 +124,10 @@ export function EPGGrid() {
   for (let t = windowStart; t < windowEnd; t += 1800) timeSlots.push(t)
 
   return (
-    <div className="flex flex-1 flex-col bg-zinc-950 overflow-hidden">
-      <div className="flex h-10 shrink-0 items-center border-b border-zinc-800/70 bg-zinc-950/80 px-5 text-xs text-zinc-500">
-        <span className="font-semibold uppercase tracking-wider text-zinc-400">Guide</span>
-        <span className="ml-3 text-zinc-600">{weekday(windowStart + HISTORY_HOURS * HOUR)}</span>
+    <div className="flex flex-1 flex-col bg-neutral-950 overflow-hidden">
+      <div className="flex h-10 shrink-0 items-center border-b border-neutral-800/70 bg-neutral-950/80 px-5 text-xs text-neutral-500">
+        <span className="font-semibold uppercase tracking-wider text-neutral-400">Guide</span>
+        <span className="ml-3 text-neutral-600">{weekday(windowStart + HISTORY_HOURS * HOUR)}</span>
         <div className="ml-4 flex items-center gap-1">
           <DayButton disabled={dayOffset <= -MAX_DAYS} onClick={() => setDayOffset(dayOffset - 1)} label="Previous day">
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -135,7 +135,7 @@ export function EPGGrid() {
           <button
             onClick={() => setDayOffset(0)}
             disabled={dayOffset === 0}
-            className="h-6 rounded px-2 text-[11px] font-medium text-zinc-300 hover:bg-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent"
+            className="h-6 rounded px-2 text-[11px] font-medium text-neutral-300 hover:bg-neutral-800 disabled:text-neutral-600 disabled:hover:bg-transparent"
           >
             Now
           </button>
@@ -143,7 +143,7 @@ export function EPGGrid() {
             <ChevronRight className="h-3.5 w-3.5" />
           </DayButton>
         </div>
-        <span className="ml-auto flex items-center gap-3 text-zinc-600">
+        <span className="ml-auto flex items-center gap-3 text-neutral-600">
           <span className="inline-flex items-center gap-1">
             <History className="h-3 w-3 text-amber-400/80" /> catch-up
           </span>
@@ -155,17 +155,17 @@ export function EPGGrid() {
         <div style={{ width: CHANNEL_COL_WIDTH + totalWidth, position: 'relative' }}>
           {/* Sticky time ruler */}
           <div
-            className="sticky top-0 z-20 flex h-8 border-b border-zinc-800/70 bg-zinc-950/95 backdrop-blur"
+            className="sticky top-0 z-20 flex h-8 border-b border-neutral-800/70 bg-neutral-950/95 backdrop-blur"
             style={{ width: CHANNEL_COL_WIDTH + totalWidth }}
           >
             <div
-              className="sticky left-0 z-30 shrink-0 border-r border-zinc-800/70 bg-zinc-950"
+              className="sticky left-0 z-30 shrink-0 border-r border-neutral-800/70 bg-neutral-950"
               style={{ width: CHANNEL_COL_WIDTH }}
             />
             {timeSlots.map((t) => (
               <div
                 key={t}
-                className="shrink-0 border-r border-zinc-900/80 px-2 text-[11px] tabular-nums leading-8 text-zinc-500"
+                className="shrink-0 border-r border-neutral-900/80 px-2 text-[11px] tabular-nums leading-8 text-neutral-500"
                 style={{ width: PIXELS_PER_HOUR / 2 }}
               >
                 {hhmm(t)}
@@ -181,21 +181,21 @@ export function EPGGrid() {
               return (
                 <div
                   key={v.key}
-                  className="absolute left-0 right-0 flex border-b border-zinc-900/70"
+                  className="absolute left-0 right-0 flex border-b border-neutral-900/70"
                   style={{ top: v.start, height: ROW_HEIGHT }}
                 >
                   <div
-                    className="sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r border-zinc-800/70 bg-zinc-950/95 px-3 text-sm backdrop-blur"
+                    className="sticky left-0 z-10 flex shrink-0 items-center gap-2 border-r border-neutral-800/70 bg-neutral-950/95 px-3 text-sm backdrop-blur"
                     style={{ width: CHANNEL_COL_WIDTH }}
                   >
-                    <div className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded bg-zinc-800 text-[10px] font-semibold text-zinc-500">
+                    <div className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded bg-neutral-800 text-[10px] font-semibold text-neutral-500">
                       {ch.logo ? (
                         <img src={ch.logo} alt="" className="h-full w-full object-contain" />
                       ) : (
                         ch.name.slice(0, 2).toUpperCase()
                       )}
                     </div>
-                    <span className="truncate text-zinc-200">{ch.name}</span>
+                    <span className="truncate text-neutral-200">{ch.name}</span>
                   </div>
 
                   <div className="relative flex-1" style={{ minWidth: totalWidth }}>
@@ -213,12 +213,12 @@ export function EPGGrid() {
                           className={cn(
                             'absolute top-1 bottom-1 rounded-md border px-2 py-1 text-left text-xs transition-colors',
                             isNow
-                              ? 'border-indigo-500/40 bg-indigo-500/10 text-zinc-100 hover:bg-indigo-500/20'
+                              ? 'border-accent-500/40 bg-accent-500/10 text-neutral-100 hover:bg-accent-500/20'
                               : catchUp
-                                ? 'border-amber-500/20 bg-zinc-900/70 text-zinc-300 hover:border-amber-500/40 hover:bg-zinc-800/80'
+                                ? 'border-amber-500/20 bg-neutral-900/70 text-neutral-300 hover:border-amber-500/40 hover:bg-neutral-800/80'
                                 : isPast
-                                  ? 'border-zinc-900/60 bg-zinc-950/60 text-zinc-500 hover:bg-zinc-900/80'
-                                  : 'border-zinc-800/60 bg-zinc-900/70 text-zinc-300 hover:bg-zinc-800/80',
+                                  ? 'border-neutral-900/60 bg-neutral-950/60 text-neutral-500 hover:bg-neutral-900/80'
+                                  : 'border-neutral-800/60 bg-neutral-900/70 text-neutral-300 hover:bg-neutral-800/80',
                           )}
                           style={{ left, width }}
                           title={[
@@ -234,7 +234,7 @@ export function EPGGrid() {
                             {catchUp && <History className="h-3 w-3 shrink-0 text-amber-400/80" />}
                             <span className="truncate">{p.title}</span>
                           </div>
-                          <div className="truncate text-[10px] tabular-nums text-zinc-500">
+                          <div className="truncate text-[10px] tabular-nums text-neutral-500">
                             {hhmm(p.start)} – {hhmm(p.stop)}
                           </div>
                         </button>
@@ -276,7 +276,7 @@ function DayButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100 disabled:text-zinc-700 disabled:hover:bg-transparent"
+      className="grid h-6 w-6 place-items-center rounded text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100 disabled:text-neutral-700 disabled:hover:bg-transparent"
     >
       {children}
     </button>

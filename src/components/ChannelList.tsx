@@ -38,19 +38,19 @@ export function ChannelList() {
     activeGroup === '__favorites' ? 'Favorites' : isHistory ? 'History' : activeGroup ?? 'All channels'
 
   return (
-    <div className="flex w-80 shrink-0 flex-col border-r border-zinc-800/70 bg-zinc-950/40">
-      <div className="flex h-10 items-center justify-between border-b border-zinc-800/70 px-4 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+    <div className="flex w-80 shrink-0 flex-col border-r border-neutral-800/70 bg-neutral-950/40">
+      <div className="flex h-10 items-center justify-between border-b border-neutral-800/70 px-4 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
         <span className="truncate">{label}</span>
         <div className="flex items-center gap-2">
           {isHistory && sortedChannels.length > 0 && <ClearHistoryButton />}
           {!isHistory && <SortMenu value={sort} onChange={setSort} />}
-          <span className="tabular-nums text-zinc-600">{sortedChannels.length.toLocaleString()}</span>
+          <span className="tabular-nums text-neutral-600">{sortedChannels.length.toLocaleString()}</span>
         </div>
       </div>
 
       {loadingChannels && channels.length === 0 && <ListSkeleton />}
       {!loadingChannels && channels.length === 0 && (
-        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-zinc-500">
+        <div className="grid flex-1 place-items-center px-6 text-center text-sm text-neutral-500">
           No channels here yet.
         </div>
       )}
@@ -94,15 +94,15 @@ function SortMenu({ value, onChange }: { value: SortMode; onChange(m: SortMode):
     <div ref={rootRef} className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-200"
+        className="grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200"
         aria-label="Sort"
         title={`Sort: ${value === 'name' ? 'Name' : 'Date added'}`}
       >
         <Icon className="h-3.5 w-3.5" />
       </button>
       {open && (
-        <div className="absolute right-0 top-7 z-20 min-w-[11rem] overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/95 py-1 text-[11px] shadow-xl shadow-black/60 backdrop-blur">
-          <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        <div className="absolute right-0 top-7 z-20 min-w-[11rem] overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/95 py-1 text-[11px] shadow-xl shadow-black/60 backdrop-blur">
+          <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
             Sort by
           </div>
           <SortOption
@@ -145,10 +145,10 @@ function SortOption({
       onClick={onClick}
       className={cn(
         'flex w-full items-center gap-2 px-3 py-1.5 text-left',
-        active ? 'text-indigo-400' : 'text-zinc-200 hover:bg-zinc-800/80',
+        active ? 'text-accent-400' : 'text-neutral-200 hover:bg-neutral-800/80',
       )}
     >
-      <span className={cn('shrink-0', active ? 'text-indigo-400' : 'text-zinc-500')}>{icon}</span>
+      <span className={cn('shrink-0', active ? 'text-accent-400' : 'text-neutral-500')}>{icon}</span>
       <span className="flex-1">{label}</span>
       {active && <span className="text-xs">●</span>}
     </button>
@@ -235,11 +235,11 @@ function ChannelRow({
       role="button"
       onClick={onClick}
       className={cn(
-        'group flex h-full items-center gap-3 border-b border-zinc-900/60 px-3 transition-colors',
-        active ? 'bg-indigo-500/10 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60',
+        'group flex h-full items-center gap-3 border-b border-neutral-900/60 px-3 transition-colors',
+        active ? 'bg-accent-500/10 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900/60',
       )}
     >
-      <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-zinc-800 text-xs font-semibold text-zinc-500">
+      <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-neutral-800 text-xs font-semibold text-neutral-500">
         {channel.logo && logoOk ? (
           <img
             src={channel.logo}
@@ -265,16 +265,16 @@ function ChannelRow({
               <History className="h-3 w-3" />
             </span>
           ) : null}
-          {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-indigo-400" />}
+          {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent-400" />}
         </div>
-        <div className="truncate text-xs text-zinc-500">
+        <div className="truncate text-xs text-neutral-500">
           {now?.title ?? (channel.group ?? '—')}
         </div>
       </div>
 
       <button
         onClick={toggleFav}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded text-zinc-600 opacity-0 transition-all hover:text-amber-400 group-hover:opacity-100"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded text-neutral-600 opacity-0 transition-all hover:text-amber-400 group-hover:opacity-100"
         aria-label="Toggle favorite"
       >
         <Star className="h-4 w-4" />
@@ -299,9 +299,9 @@ export function ProgressStripe({ progress }: { progress: HistoryProgress | undef
   if (!isResumable(progress)) return null
   const pct = Math.min(100, Math.max(1, (progress.timePos / progress.duration) * 100))
   return (
-    <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-zinc-800">
+    <span className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 bg-neutral-800">
       <span
-        className="block h-full bg-indigo-400"
+        className="block h-full bg-accent-400"
         style={{ width: `${pct.toFixed(2)}%` }}
       />
     </span>
@@ -325,7 +325,7 @@ function ClearHistoryButton() {
   return (
     <button
       onClick={onClick}
-      className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-zinc-800/70 hover:text-rose-300"
+      className="grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-neutral-800/70 hover:text-rose-300"
       aria-label="Clear history"
       title="Clear all history"
     >
@@ -429,11 +429,11 @@ function HistoryRow({
       role="button"
       onClick={onClick}
       className={cn(
-        'group relative flex h-full items-center gap-3 border-b border-zinc-900/60 px-3 transition-colors',
-        active ? 'bg-indigo-500/10 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60',
+        'group relative flex h-full items-center gap-3 border-b border-neutral-900/60 px-3 transition-colors',
+        active ? 'bg-accent-500/10 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900/60',
       )}
     >
-      <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-zinc-800 text-xs font-semibold text-zinc-500">
+      <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-neutral-800 text-xs font-semibold text-neutral-500">
         {channel.logo && logoOk ? (
           <img
             src={channel.logo}
@@ -456,11 +456,11 @@ function HistoryRow({
             </span>
           )}
         </div>
-        <div className="truncate text-xs text-zinc-500">{subtitle}</div>
+        <div className="truncate text-xs text-neutral-500">{subtitle}</div>
       </div>
       <button
         onClick={onDelete}
-        className="grid h-7 w-7 shrink-0 place-items-center rounded text-zinc-600 opacity-0 transition-all hover:text-rose-400 group-hover:opacity-100"
+        className="grid h-7 w-7 shrink-0 place-items-center rounded text-neutral-600 opacity-0 transition-all hover:text-rose-400 group-hover:opacity-100"
         aria-label="Remove from history"
       >
         <Trash2 className="h-4 w-4" />
@@ -488,10 +488,10 @@ export function ListSkeleton() {
     <div className="flex flex-col gap-1 p-3">
       {Array.from({ length: 10 }).map((_, i) => (
         <div key={i} className="flex items-center gap-3 p-2">
-          <div className="h-10 w-10 animate-pulse rounded-md bg-zinc-900" />
+          <div className="h-10 w-10 animate-pulse rounded-md bg-neutral-900" />
           <div className="flex-1 space-y-2">
-            <div className="h-3 w-2/3 animate-pulse rounded bg-zinc-900" />
-            <div className="h-2 w-1/3 animate-pulse rounded bg-zinc-900" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-neutral-900" />
+            <div className="h-2 w-1/3 animate-pulse rounded bg-neutral-900" />
           </div>
         </div>
       ))}

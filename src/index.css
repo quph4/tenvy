@@ -8,7 +8,7 @@
   html,
   body,
   #root {
-    @apply h-full m-0 overflow-hidden bg-zinc-950 text-zinc-100 font-sans antialiased;
+    @apply h-full m-0 overflow-hidden bg-neutral-950 text-neutral-100 font-sans antialiased;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
   }
 
@@ -21,11 +21,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgb(39 39 42); /* zinc-800 */
+    background: rgb(38 38 38); /* neutral-800 */
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgb(63 63 70); /* zinc-700 */
+    background: rgb(64 64 64); /* neutral-700 */
   }
 
   /* Hide default focus outline; we add our own accent rings where needed */
@@ -36,12 +36,12 @@
 
 @layer components {
   .panel {
-    @apply bg-zinc-900/60 border border-zinc-800/70 backdrop-blur-sm;
+    @apply bg-neutral-900/60 border border-neutral-800/70 backdrop-blur-sm;
   }
   .row-hover {
-    @apply transition-colors duration-100 hover:bg-zinc-800/60;
+    @apply transition-colors duration-100 hover:bg-neutral-800/60;
   }
   .kbd {
-    @apply inline-flex items-center rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400;
+    @apply inline-flex items-center rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 text-[10px] font-medium text-neutral-400;
   }
 }

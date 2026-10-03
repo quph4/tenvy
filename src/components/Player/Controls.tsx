@@ -79,7 +79,7 @@ export function Controls({
   }
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-zinc-800/70 bg-zinc-950/95 px-4 py-2">
+    <div className="flex shrink-0 flex-col gap-2 border-t border-neutral-800/70 bg-neutral-950/95 px-4 py-2">
       {(isVod || catchup) && (
         <ScrubRow
           timePos={timePos}
@@ -122,7 +122,7 @@ export function Controls({
             step={0.01}
             value={muted ? 0 : volume}
             onChange={(e) => setVolume(Number(e.target.value))}
-            className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-white/20 accent-indigo-400"
+            className="h-1 w-24 cursor-pointer appearance-none rounded-full bg-white/20 accent-accent-400"
             aria-label="Volume"
           />
         </div>
@@ -248,7 +248,7 @@ function ScrubRow({
         onMouseUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
         onKeyUp={(e) => commit(Number((e.target as HTMLInputElement).value))}
         onTouchEnd={(e) => commit(Number((e.target as HTMLInputElement).value))}
-        className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 accent-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+        className="h-1 flex-1 cursor-pointer appearance-none rounded-full bg-white/20 accent-accent-400 disabled:cursor-not-allowed disabled:opacity-50"
         aria-label="Seek"
       />
       <span className="shrink-0 text-[11px] tabular-nums text-white/60">

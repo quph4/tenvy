@@ -28,18 +28,18 @@ export function IngestOverlay() {
 
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 backdrop-blur-sm animate-fade-in">
-      <div className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 px-6 py-5 shadow-2xl shadow-black/60">
+      <div className="w-full max-w-md rounded-xl border border-neutral-800 bg-neutral-900 px-6 py-5 shadow-2xl shadow-black/60">
         <div className="flex items-center gap-3">
-          <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
-          <h3 className="text-sm font-semibold text-zinc-100">
+          <Loader2 className="h-4 w-4 animate-spin text-accent-400" />
+          <h3 className="text-sm font-semibold text-neutral-100">
             Refreshing {status.sourceName}
           </h3>
-          <span className="ml-auto text-[11px] tabular-nums text-zinc-500">{elapsed}s</span>
+          <span className="ml-auto text-[11px] tabular-nums text-neutral-500">{elapsed}s</span>
         </div>
 
         <StageIndicator stage={status.stage} count={status.count} />
 
-        <p className="mt-3 text-[11px] text-zinc-500">
+        <p className="mt-3 text-[11px] text-neutral-500">
           The UI is locked while we rewrite the local database. This usually
           takes a few seconds — large Xtream accounts with tens of thousands
           of VOD entries can run a bit longer.
@@ -75,23 +75,23 @@ function StageIndicator({ stage, count }: { stage: IngestStage; count: number })
                 state === 'done'
                   ? 'h-1.5 w-1.5 rounded-full bg-emerald-400'
                   : state === 'active'
-                    ? 'h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400'
-                    : 'h-1.5 w-1.5 rounded-full bg-zinc-700'
+                    ? 'h-1.5 w-1.5 animate-pulse rounded-full bg-accent-400'
+                    : 'h-1.5 w-1.5 rounded-full bg-neutral-700'
               }
             />
             <span
               className={
                 state === 'done'
-                  ? 'text-zinc-300'
+                  ? 'text-neutral-300'
                   : state === 'active'
-                    ? 'text-zinc-100'
-                    : 'text-zinc-600'
+                    ? 'text-neutral-100'
+                    : 'text-neutral-600'
               }
             >
               {STAGE_LABEL[s]}
             </span>
             {showCount && (
-              <span className="ml-auto tabular-nums text-zinc-500">
+              <span className="ml-auto tabular-nums text-neutral-500">
                 {count.toLocaleString()} entries
               </span>
             )}

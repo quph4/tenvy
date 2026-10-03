@@ -370,7 +370,7 @@ export function Player() {
             <div
               aria-hidden={activePicker === null}
               style={{ width: activePicker ? DRAWER_WIDTH : 0 }}
-              className="shrink-0 overflow-hidden border-l border-zinc-800/70 bg-zinc-950/95 transition-[width] duration-200 ease-out"
+              className="shrink-0 overflow-hidden border-l border-neutral-800/70 bg-neutral-950/95 transition-[width] duration-200 ease-out"
             >
               <div style={{ width: DRAWER_WIDTH }} className="h-full">
                 {activePicker === 'audio' && (
@@ -406,11 +406,11 @@ function PlayerEmpty({ error }: { error: string | null }) {
   return (
     <div className="grid h-full place-items-center text-center">
       <div className="max-w-sm space-y-3 animate-fade-in">
-        <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-zinc-900 text-zinc-500">
+        <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-neutral-900 text-neutral-500">
           <Tv2 className="h-6 w-6" />
         </div>
-        <div className="text-sm font-medium text-zinc-300">Pick a channel</div>
-        <div className="text-xs text-zinc-500">
+        <div className="text-sm font-medium text-neutral-300">Pick a channel</div>
+        <div className="text-xs text-neutral-500">
           Select something from the list on the left, or press{' '}
           <span className="kbd">Ctrl K</span> to search.
         </div>
@@ -461,19 +461,19 @@ function NowNext() {
   if (!now && !next) return null
 
   return (
-    <div className="border-t border-zinc-800/70 bg-zinc-950/80 px-5 py-3 backdrop-blur">
+    <div className="border-t border-neutral-800/70 bg-neutral-950/80 px-5 py-3 backdrop-blur">
       <div className="flex items-baseline gap-3">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400">Now</span>
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-accent-400">Now</span>
         {now ? (
           <>
-            <span className="truncate text-sm font-medium text-zinc-100">{now.title}</span>
-            <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+            <span className="truncate text-sm font-medium text-neutral-100">{now.title}</span>
+            <span className="shrink-0 text-xs tabular-nums text-neutral-500">
               {hhmm(now.start)} – {hhmm(now.stop)}
             </span>
             {channel?.archiveDays ? (
               <button
                 onClick={() => usePlayback.getState().playCatchup(channel, now)}
-                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-neutral-800 px-2 py-0.5 text-[11px] text-neutral-300 hover:border-neutral-700 hover:text-neutral-100"
                 title="Watch this programme from the beginning"
               >
                 <RotateCcw className="h-3 w-3" />
@@ -482,14 +482,14 @@ function NowNext() {
             ) : null}
           </>
         ) : (
-          <span className="text-xs text-zinc-500">No guide data</span>
+          <span className="text-xs text-neutral-500">No guide data</span>
         )}
       </div>
       {next && (
         <div className="mt-1 flex items-baseline gap-3">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Next</span>
-          <span className="truncate text-sm text-zinc-400">{next.title}</span>
-          <span className="shrink-0 text-xs tabular-nums text-zinc-600">{hhmm(next.start)}</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Next</span>
+          <span className="truncate text-sm text-neutral-400">{next.title}</span>
+          <span className="shrink-0 text-xs tabular-nums text-neutral-600">{hhmm(next.start)}</span>
         </div>
       )}
     </div>

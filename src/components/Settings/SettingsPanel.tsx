@@ -43,14 +43,14 @@ export function SettingsPanel() {
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/50 animate-fade-in" onClick={toggleSettings}>
       <aside
-        className="flex h-full w-96 flex-col border-l border-zinc-800 bg-zinc-900 shadow-2xl"
+        className="flex h-full w-96 flex-col border-l border-neutral-800 bg-neutral-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
-          <h2 className="text-sm font-semibold text-zinc-100">Settings</h2>
+        <div className="flex items-center justify-between border-b border-neutral-800 px-5 py-3">
+          <h2 className="text-sm font-semibold text-neutral-100">Settings</h2>
           <button
             onClick={toggleSettings}
-            className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            className="grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -58,12 +58,12 @@ export function SettingsPanel() {
 
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
               Playlists
             </span>
             <button
               onClick={openAddSource}
-              className="inline-flex h-7 items-center gap-1 rounded-md bg-indigo-500 px-2.5 text-xs font-semibold text-zinc-950 hover:bg-indigo-400"
+              className="inline-flex h-7 items-center gap-1 rounded-md bg-accent-400 px-2.5 text-xs font-semibold text-neutral-950 hover:bg-accent-300"
             >
               <Plus className="h-3 w-3" />
               Add
@@ -71,7 +71,7 @@ export function SettingsPanel() {
           </div>
 
           {sources.length === 0 && (
-            <div className="rounded-md border border-dashed border-zinc-800 p-6 text-center text-xs text-zinc-500">
+            <div className="rounded-md border border-dashed border-neutral-800 p-6 text-center text-xs text-neutral-500">
               No playlists yet. Add one to get started.
             </div>
           )}
@@ -80,24 +80,24 @@ export function SettingsPanel() {
             {sources.map((s) => (
               <li
                 key={s.id}
-                className="flex items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-sm"
+                className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-sm"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-zinc-200">{s.name}</div>
-                  <div className="truncate text-[11px] text-zinc-500">
+                  <div className="truncate text-neutral-200">{s.name}</div>
+                  <div className="truncate text-[11px] text-neutral-500">
                     {s.kind.toUpperCase()} · {new URL(s.url.startsWith('http') ? s.url : 'file://' + s.url).hostname || s.url}
                   </div>
                 </div>
                 <button
                   onClick={() => refresh(s.id, s.name)}
-                  className="grid h-7 w-7 place-items-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                  className="grid h-7 w-7 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
                   aria-label="Refresh"
                 >
                   <RefreshCcw className="h-3.5 w-3.5" />
                 </button>
                 <button
                   onClick={() => remove(s.id)}
-                  className="grid h-7 w-7 place-items-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                  className="grid h-7 w-7 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
                   aria-label="Remove"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -132,17 +132,17 @@ function AboutSection() {
               : null
 
   return (
-    <div className="border-t border-zinc-800 p-5">
-      <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">About</span>
+    <div className="border-t border-neutral-800 p-5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">About</span>
       <div className="mt-2 flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm text-zinc-200">Tenvy {__APP_VERSION__}</div>
-          {line && <div className="mt-0.5 text-[11px] text-zinc-500">{line}</div>}
+          <div className="text-sm text-neutral-200">Tenvy {__APP_VERSION__}</div>
+          {line && <div className="mt-0.5 text-[11px] text-neutral-500">{line}</div>}
         </div>
         {status.kind === 'available' ? (
           <button
             onClick={() => install()}
-            className="inline-flex h-7 items-center rounded-md bg-indigo-500 px-2.5 text-xs font-semibold text-zinc-950 hover:bg-indigo-400"
+            className="inline-flex h-7 items-center rounded-md bg-accent-400 px-2.5 text-xs font-semibold text-neutral-950 hover:bg-accent-300"
           >
             Install
           </button>
@@ -150,7 +150,7 @@ function AboutSection() {
           <button
             onClick={() => checkForUpdates(true)}
             disabled={status.kind === 'checking' || status.kind === 'downloading'}
-            className="inline-flex h-7 items-center rounded-md border border-zinc-800 px-2.5 text-xs text-zinc-300 hover:border-zinc-700 disabled:opacity-50"
+            className="inline-flex h-7 items-center rounded-md border border-neutral-800 px-2.5 text-xs text-neutral-300 hover:border-neutral-700 disabled:opacity-50"
           >
             Check for updates
           </button>

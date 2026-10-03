@@ -87,7 +87,7 @@ function App() {
         )}
       </main>
 
-      {!chromeless && <footer className="flex h-7 items-center gap-3 border-t border-zinc-800/70 bg-zinc-950/80 px-4 text-[11px] text-zinc-500">
+      {!chromeless && <footer className="flex h-7 items-center gap-3 border-t border-neutral-800/70 bg-neutral-950/80 px-4 text-[11px] text-neutral-500">
         <span>
           <span className="kbd mr-1">G</span>
           Guide
@@ -108,7 +108,7 @@ function App() {
           <span className="kbd mr-1">P</span>
           Mini player
         </span>
-        <span className="ml-auto tabular-nums text-zinc-600">Tenvy · {__APP_VERSION__}</span>
+        <span className="ml-auto tabular-nums text-neutral-600">Tenvy · {__APP_VERSION__}</span>
       </footer>}
 
       <SearchPalette />

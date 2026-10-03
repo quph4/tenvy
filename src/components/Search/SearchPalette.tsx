@@ -103,22 +103,22 @@ export function SearchPalette() {
       onClick={closeSearch}
     >
       <div
-        className="mx-auto w-full max-w-xl overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/95 shadow-2xl shadow-black/60"
+        className="mx-auto w-full max-w-xl overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900/95 shadow-2xl shadow-black/60"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onKeyDown}
       >
-        <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-3">
-          <SearchIcon className="h-4 w-4 text-zinc-500" />
+        <div className="flex items-center gap-2 border-b border-neutral-800 px-4 py-3">
+          <SearchIcon className="h-4 w-4 text-neutral-500" />
           <input
             ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Channels, movies and series…"
-            className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-600 outline-none"
+            className="flex-1 bg-transparent text-sm text-neutral-100 placeholder-neutral-600 outline-none"
           />
           <button
             onClick={closeSearch}
-            className="grid h-6 w-6 place-items-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            className="grid h-6 w-6 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
             aria-label="Close search"
           >
             <X className="h-3.5 w-3.5" />
@@ -127,7 +127,7 @@ export function SearchPalette() {
 
         <ul ref={listRef} className="max-h-96 overflow-y-auto py-1">
           {q.trim() && results.length === 0 && (
-            <li className="px-4 py-6 text-center text-sm text-zinc-500">No matches.</li>
+            <li className="px-4 py-6 text-center text-sm text-neutral-500">No matches.</li>
           )}
           {results.map((ch, i) => (
             <li key={ch.id}>
@@ -135,11 +135,11 @@ export function SearchPalette() {
                 onClick={() => pick(ch)}
                 onMouseMove={() => setSelected(i)}
                 className={cn(
-                  'flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-zinc-300',
-                  i === selected && 'bg-zinc-800/80',
+                  'flex w-full items-center gap-3 px-4 py-2 text-left text-sm text-neutral-300',
+                  i === selected && 'bg-neutral-800/80',
                 )}
               >
-                <div className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded bg-zinc-800 text-[10px] font-semibold text-zinc-500">
+                <div className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded bg-neutral-800 text-[10px] font-semibold text-neutral-500">
                   {ch.logo ? (
                     <img src={ch.logo} alt="" referrerPolicy="no-referrer" className="h-full w-full object-contain" />
                   ) : (
@@ -148,15 +148,15 @@ export function SearchPalette() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate">{ch.name}</div>
-                  {ch.group && <div className="truncate text-xs text-zinc-500">{ch.group}</div>}
+                  {ch.group && <div className="truncate text-xs text-neutral-500">{ch.group}</div>}
                 </div>
-                <span className="shrink-0 text-zinc-600">{KIND_ICON[ch.kind]}</span>
+                <span className="shrink-0 text-neutral-600">{KIND_ICON[ch.kind]}</span>
               </button>
             </li>
           ))}
         </ul>
 
-        <div className="flex items-center gap-3 border-t border-zinc-800 bg-zinc-950/60 px-4 py-2 text-[11px] text-zinc-500">
+        <div className="flex items-center gap-3 border-t border-neutral-800 bg-neutral-950/60 px-4 py-2 text-[11px] text-neutral-500">
           <span className="kbd">↑↓</span>
           <span>select</span>
           <span className="kbd">↵</span>

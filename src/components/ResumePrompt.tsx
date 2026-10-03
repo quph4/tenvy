@@ -40,16 +40,16 @@ export function ResumePrompt() {
       onClick={cancel}
     >
       <div
-        className="w-full max-w-sm rounded-xl border border-zinc-800 bg-zinc-950/95 p-6 shadow-2xl shadow-black/70"
+        className="w-full max-w-sm rounded-xl border border-neutral-800 bg-neutral-950/95 p-6 shadow-2xl shadow-black/70"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-400">
+        <div className="text-[10px] font-semibold uppercase tracking-wider text-accent-400">
           Pick up where you left off?
         </div>
-        <div className="mt-2 truncate text-base font-medium text-zinc-100">
+        <div className="mt-2 truncate text-base font-medium text-neutral-100">
           {pending.channel.name}
         </div>
-        <div className="mt-1 text-xs text-zinc-500">
+        <div className="mt-1 text-xs text-neutral-500">
           Last watched at {fmtResume(pending.savedSeconds)}
         </div>
 
@@ -57,24 +57,24 @@ export function ResumePrompt() {
           <button
             autoFocus
             onClick={() => resolve(false)}
-            className="flex items-center gap-3 rounded-md bg-indigo-500 px-3 py-2.5 text-left text-sm font-medium text-white transition-colors hover:bg-indigo-400"
+            className="flex items-center gap-3 rounded-md bg-accent-400 px-3 py-2.5 text-left text-sm font-semibold text-neutral-950 transition-colors hover:bg-accent-300"
           >
             <Play className="h-4 w-4" />
             <span className="flex-1">Resume</span>
-            <span className="text-xs tabular-nums text-indigo-100/70">
+            <span className="text-xs tabular-nums text-neutral-950/60">
               {fmtResume(pending.savedSeconds)}
             </span>
           </button>
           <button
             onClick={() => resolve(true)}
-            className="flex items-center gap-3 rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 text-left text-sm text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-zinc-900"
+            className="flex items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2.5 text-left text-sm text-neutral-200 transition-colors hover:border-neutral-700 hover:bg-neutral-900"
           >
-            <RotateCcw className="h-4 w-4 text-zinc-500" />
+            <RotateCcw className="h-4 w-4 text-neutral-500" />
             <span className="flex-1">Start from beginning</span>
           </button>
         </div>
 
-        <div className="mt-4 text-[11px] text-zinc-600">
+        <div className="mt-4 text-[11px] text-neutral-600">
           <span className="kbd mr-1">Enter</span> Resume ·
           <span className="kbd mx-1">Esc</span> Cancel
         </div>

@@ -68,19 +68,19 @@ export function Library() {
         : activeGroup ?? (activeKind === 'movie' ? 'All movies' : 'All series')
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-zinc-950">
-      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-zinc-800/70 px-6">
-        <span className="text-zinc-500">
+    <div className="flex min-w-0 flex-1 flex-col bg-neutral-950">
+      <div className="flex h-12 shrink-0 items-center gap-3 border-b border-neutral-800/70 px-6">
+        <span className="text-neutral-500">
           {activeKind === 'movie' ? <Film className="h-4 w-4" /> : <MonitorPlay className="h-4 w-4" />}
         </span>
-        <h1 className="truncate text-sm font-semibold text-zinc-100">{label}</h1>
-        <span className="text-xs tabular-nums text-zinc-600">{cards.length.toLocaleString()}</span>
-        <label className="ml-auto flex items-center gap-2 text-[11px] text-zinc-500">
+        <h1 className="truncate text-sm font-semibold text-neutral-100">{label}</h1>
+        <span className="text-xs tabular-nums text-neutral-600">{cards.length.toLocaleString()}</span>
+        <label className="ml-auto flex items-center gap-2 text-[11px] text-neutral-500">
           Sort
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as LibrarySort)}
-            className="h-7 rounded-md border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-200 outline-none hover:border-zinc-700"
+            className="h-7 rounded-md border border-neutral-800 bg-neutral-900 px-2 text-xs text-neutral-200 outline-none hover:border-neutral-700"
           >
             {SORTS.map((s) => (
               <option key={s.value} value={s.value}>
@@ -94,7 +94,7 @@ export function Library() {
       {loadingChannels && cards.length === 0 ? (
         <ListSkeleton />
       ) : cards.length === 0 ? (
-        <div className="grid flex-1 place-items-center text-sm text-zinc-500">Nothing here yet.</div>
+        <div className="grid flex-1 place-items-center text-sm text-neutral-500">Nothing here yet.</div>
       ) : (
         <PosterGrid cards={cards} />
       )}
@@ -245,7 +245,7 @@ function PosterCard({ card }: { card: Card }) {
   const meta = [card.year, card.rating ? `★ ${card.rating.toFixed(1)}` : null].filter(Boolean).join(' · ')
   return (
     <button onClick={card.open} className="group min-w-0 text-left outline-none">
-      <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-zinc-900 ring-1 ring-white/5 transition group-hover:ring-2 group-hover:ring-indigo-400/70 group-focus-visible:ring-2 group-focus-visible:ring-indigo-400">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-neutral-900 ring-1 ring-white/5 transition group-hover:ring-2 group-hover:ring-accent-400/70 group-focus-visible:ring-2 group-focus-visible:ring-accent-400">
         <Poster src={card.poster} title={card.title} className="transition duration-300 group-hover:scale-[1.03]" />
         {progress?.finished && (
           <span className="absolute right-1.5 top-1.5 rounded bg-emerald-500/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white shadow">
@@ -254,8 +254,8 @@ function PosterCard({ card }: { card: Card }) {
         )}
         <ProgressStripe progress={progress} />
       </div>
-      <div className="mt-2 truncate text-[13px] font-medium text-zinc-200 group-hover:text-white">{card.title}</div>
-      <div className="h-4 truncate text-[11px] tabular-nums text-zinc-500">{meta}</div>
+      <div className="mt-2 truncate text-[13px] font-medium text-neutral-200 group-hover:text-white">{card.title}</div>
+      <div className="h-4 truncate text-[11px] tabular-nums text-neutral-500">{meta}</div>
     </button>
   )
 }
@@ -275,21 +275,21 @@ function NowPlayingBar() {
     pl.setActiveKind(channel.kind).catch(() => {})
   }
   return (
-    <div className="flex h-11 shrink-0 items-center gap-3 border-t border-zinc-800/70 bg-zinc-900/90 px-5 text-xs">
-      <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-indigo-400" />
-      <span className="text-zinc-500">Now playing</span>
-      <span className="truncate font-medium text-zinc-200">{parseTitle(channel.name).title}</span>
+    <div className="flex h-11 shrink-0 items-center gap-3 border-t border-neutral-800/70 bg-neutral-900/90 px-5 text-xs">
+      <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent-400" />
+      <span className="text-neutral-500">Now playing</span>
+      <span className="truncate font-medium text-neutral-200">{parseTitle(channel.name).title}</span>
       <div className="ml-auto flex items-center gap-1">
         <button
           onClick={backToPlayer}
-          className={cn('inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-zinc-200 hover:bg-zinc-800')}
+          className={cn('inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-neutral-200 hover:bg-neutral-800')}
         >
           <Tv className="h-3.5 w-3.5" />
           Back to player
         </button>
         <button
           onClick={() => usePlayback.getState().stop()}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+          className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
         >
           <Square className="h-3 w-3" />
           Stop

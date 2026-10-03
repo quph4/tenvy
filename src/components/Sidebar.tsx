@@ -70,9 +70,9 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-60 flex-col border-r border-zinc-800/70 bg-zinc-950/60">
+    <aside className="flex w-60 flex-col border-r border-neutral-800/70 bg-neutral-950/60">
       {/* Content-kind tabs. Switching swaps out the group list below. */}
-      <div className="grid grid-cols-3 gap-1 border-b border-zinc-800/70 p-2">
+      <div className="grid grid-cols-3 gap-1 border-b border-neutral-800/70 p-2">
         {KIND_TABS.map((t) => (
           <button
             key={t.kind}
@@ -80,11 +80,11 @@ export function Sidebar() {
             className={cn(
               'flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider transition-colors',
               activeKind === t.kind
-                ? 'bg-zinc-800/80 text-zinc-100'
-                : 'text-zinc-500 hover:bg-zinc-900/80 hover:text-zinc-300',
+                ? 'bg-neutral-800/80 text-neutral-100'
+                : 'text-neutral-500 hover:bg-neutral-900/80 hover:text-neutral-300',
             )}
           >
-            <span className={cn(activeKind === t.kind ? 'text-indigo-400' : 'text-zinc-500')}>
+            <span className={cn(activeKind === t.kind ? 'text-accent-400' : 'text-neutral-500')}>
               {t.icon}
             </span>
             <span>{t.label}</span>
@@ -116,14 +116,14 @@ export function Sidebar() {
 
         {pinnedGroups.length > 0 && (
           <>
-            <div className="mt-3 mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+            <div className="mt-3 mb-1 px-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
               Pinned
             </div>
             {pinnedGroups.map((g) => (
               <SidebarItem
                 key={`pin-${g.name}`}
                 label={g.name}
-                icon={<Pin className="h-3.5 w-3.5 text-indigo-400" />}
+                icon={<Pin className="h-3.5 w-3.5 text-accent-400" />}
                 badge={g.count}
                 active={activeGroup === g.name}
                 onClick={() => setActiveGroup(g.name)}
@@ -134,11 +134,11 @@ export function Sidebar() {
           </>
         )}
 
-        <div className="mt-3 mb-1 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+        <div className="mt-3 mb-1 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
           <span>Groups</span>
           <button
             onClick={() => setSort(sort === 'provider' ? 'name' : 'provider')}
-            className="grid h-5 w-5 place-items-center rounded text-zinc-600 hover:bg-zinc-800/70 hover:text-zinc-300"
+            className="grid h-5 w-5 place-items-center rounded text-neutral-600 hover:bg-neutral-800/70 hover:text-neutral-300"
             aria-label="Toggle group sort"
             title={
               sort === 'provider'
@@ -155,7 +155,7 @@ export function Sidebar() {
         </div>
 
         {groups.length === 0 && (
-          <div className="px-2 py-4 text-xs text-zinc-600">{emptyHintFor(activeKind)}</div>
+          <div className="px-2 py-4 text-xs text-neutral-600">{emptyHintFor(activeKind)}</div>
         )}
 
         {otherGroups.map((g) => (
@@ -208,8 +208,8 @@ function SidebarItem({
       className={cn(
         'group relative flex w-full items-center gap-2 rounded-md text-left text-sm transition-colors',
         active
-          ? 'bg-zinc-800/80 text-zinc-100'
-          : 'text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200',
+          ? 'bg-neutral-800/80 text-neutral-100'
+          : 'text-neutral-400 hover:bg-neutral-800/40 hover:text-neutral-200',
       )}
     >
       <button
@@ -220,10 +220,10 @@ function SidebarItem({
         // icon.
         className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
       >
-        <span className={cn('shrink-0', accent ? 'text-indigo-400' : 'text-zinc-500')}>{icon}</span>
+        <span className={cn('shrink-0', accent ? 'text-accent-400' : 'text-neutral-500')}>{icon}</span>
         <span className="flex-1 truncate">{label}</span>
         {badge !== undefined && (
-          <span className="shrink-0 text-[11px] tabular-nums text-zinc-500">
+          <span className="shrink-0 text-[11px] tabular-nums text-neutral-500">
             {badge.toLocaleString()}
           </span>
         )}
@@ -237,8 +237,8 @@ function SidebarItem({
           className={cn(
             'mr-1 grid h-6 w-6 shrink-0 place-items-center rounded transition-all',
             pinned
-              ? 'text-indigo-400 opacity-100 hover:bg-zinc-800/60'
-              : 'text-zinc-600 opacity-0 hover:bg-zinc-800/60 hover:text-zinc-300 group-hover:opacity-100',
+              ? 'text-accent-400 opacity-100 hover:bg-neutral-800/60'
+              : 'text-neutral-600 opacity-0 hover:bg-neutral-800/60 hover:text-neutral-300 group-hover:opacity-100',
           )}
           aria-label={pinned ? 'Unpin group' : 'Pin group'}
           title={pinned ? 'Unpin' : 'Pin'}
@@ -246,7 +246,7 @@ function SidebarItem({
           {pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
         </button>
       )}
-      {active && <span className="pointer-events-none absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-indigo-400" />}
+      {active && <span className="pointer-events-none absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-accent-400" />}
     </div>
   )
 }

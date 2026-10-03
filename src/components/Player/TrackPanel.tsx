@@ -22,11 +22,11 @@ export function TrackPanel({
 }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center justify-between border-b border-zinc-800/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+      <div className="flex shrink-0 items-center justify-between border-b border-neutral-800/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
         <span>{label}</span>
         <button
           onClick={onClose}
-          className="grid h-5 w-5 place-items-center rounded text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200"
+          className="grid h-5 w-5 place-items-center rounded text-neutral-500 hover:bg-neutral-800/60 hover:text-neutral-200"
           aria-label="Close"
         >
           ×
@@ -34,7 +34,7 @@ export function TrackPanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-1 text-sm">
         {options.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-zinc-500">
+          <div className="px-3 py-4 text-xs text-neutral-500">
             {emptyHint ?? 'Nothing available.'}
           </div>
         ) : (
@@ -45,8 +45,8 @@ export function TrackPanel({
               className={cn(
                 'flex w-full items-center justify-between gap-4 px-3 py-2 text-left',
                 o.active
-                  ? 'bg-indigo-500/10 text-indigo-300'
-                  : 'text-zinc-200 hover:bg-zinc-800/60',
+                  ? 'bg-accent-500/10 text-accent-300'
+                  : 'text-neutral-200 hover:bg-neutral-800/60',
               )}
             >
               <span className="truncate">{o.label}</span>

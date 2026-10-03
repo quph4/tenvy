@@ -13,12 +13,12 @@ export function Toasts() {
             'pointer-events-auto flex items-center gap-2 rounded-lg border px-3.5 py-2.5 text-sm shadow-lg shadow-black/40 backdrop-blur animate-fade-in',
             t.kind === 'success' && 'border-emerald-500/30 bg-emerald-950/80 text-emerald-100',
             t.kind === 'error' && 'border-red-500/30 bg-red-950/80 text-red-100',
-            t.kind === 'info' && 'border-zinc-700 bg-zinc-900/90 text-zinc-100',
+            t.kind === 'info' && 'border-neutral-700 bg-neutral-900/90 text-neutral-100',
           )}
         >
           {t.kind === 'success' && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
           {t.kind === 'error' && <AlertCircle className="h-4 w-4 text-red-400" />}
-          {t.kind === 'info' && <Info className="h-4 w-4 text-zinc-400" />}
+          {t.kind === 'info' && <Info className="h-4 w-4 text-neutral-400" />}
           <span className="max-w-xs truncate">{t.message}</span>
         </div>
       ))}
