@@ -203,6 +203,18 @@ impl Mpv {
             // video rect. OSC would paint *inside* the native surface, which
             // our HTML can't reach, so it'd trap clicks we want on scrub.
             .arg("--osc=no")
+            // On-screen messages (channel info, reminders) are drawn by
+            // mpv: in fullscreen the native surface covers the webview, so
+            // this is the only text that can appear over the picture.
+            // Options here exist in every mpv we support.
+            .arg("--osd-font=Segoe UI")
+            .arg("--osd-font-size=40")
+            .arg("--osd-color=#F5F5F5")
+            .arg("--osd-border-color=#B0000000")
+            .arg("--osd-border-size=2")
+            .arg("--osd-shadow-offset=0")
+            .arg("--osd-margin-x=56")
+            .arg("--osd-margin-y=44")
             .arg("--no-terminal")
             // Streaming IPTV needs a buffer so scrub/seek don't stall while
             // the demuxer re-fetches. 150 MB is ~90s of 1080p H.264.
@@ -312,6 +324,7 @@ impl Mpv {
         start_seconds: Option<f64>,
         user_agent: Option<&str>,
         referrer: Option<&str>,
+        extra_options: &[String],
     ) -> Result<()> {
         stream_url::validate(url)?;
         tracing::info!(
@@ -335,6 +348,7 @@ impl Mpv {
                 options.push(format!("{}=%{}%{}", key, v.len(), v));
             }
         }
+        options.extend(extra_options.iter().cloned());
 
         // Close the current stream before opening the next. `loadfile
         // replace` alone opens the new connection while the old one is
@@ -390,6 +404,13 @@ impl Mpv {
             None => json!("no"),
         };
         self.set_property("sid", v).await
+    }
+
+    /// Show a message over the video for `duration_ms`. JSON IPC commands
+    /// don't expand `${…}`, so the text is shown exactly as given.
+    pub async fn show_text(&self, text: &str, duration_ms: u32) -> Result<()> {
+        self.command(&[json!("show-text"), json!(text), json!(duration_ms)]).await?;
+        Ok(())
     }
 
     pub async fn stop(&self) -> Result<()> {

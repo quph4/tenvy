@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- TV-style channel switching: type a channel number (0–9), Backspace for
+  the previous channel, PgUp/PgDn as well as ↑/↓, and a banner over the
+  picture with the channel, what's on now (and how long is left) and next.
+- Reminders and other notices now appear over the video in fullscreen;
+  press Enter to act on them ("Watch now").
+- Tenvy remembers the audio and subtitle language you pick (or that you
+  turned subtitles off) and uses it on every channel and film.
+- Optional: start with the last channel (Settings → Playback).
+- Open-source licenses and the privacy policy are linked from Settings →
+  About; license texts are installed with Tenvy.
 - Tenvy is free. "Support Tenvy" (footer and Settings → About) and an
   occasional, gentle prompt once you've used it for a while; both, and
   short announcements, are controlled from the website without an update.

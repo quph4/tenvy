@@ -23,6 +23,8 @@ import { isResumable, useHistory } from './history'
 interface PlaybackState {
   // ---- UI intent ----
   channel: Channel | null
+  /** The live channel watched before this one (Backspace goes back). */
+  previous: Channel | null
   /** 0..1 in UI units; mpv's 0..100 conversion happens in `ipc.ts`. */
   volume: number
   muted: boolean
@@ -97,6 +99,7 @@ interface PlaybackState {
 
 export const usePlayback = create<PlaybackState>((set, get) => ({
   channel: null,
+  previous: null,
   volume: 0.8,
   muted: false,
   fullscreen: false,
@@ -129,6 +132,7 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       playNonce: s.playNonce + 1,
       catchup: null,
       channel: ch,
+      previous: s.channel?.kind === 'live' && s.channel.id !== ch.id ? s.channel : s.previous,
       playing: true,
       pendingStart: startSeconds,
       pendingResume: null,

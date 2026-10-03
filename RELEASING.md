@@ -110,5 +110,4 @@ Everything fails open: a broken or missing file means free, no prompts.
   decide the install folder, the data folder (`%APPDATA%\app.tenvy.player`)
   and what the updater recognises as "this app". Never change them after
   users have installed it.
-- Include the mpv license text in the installer (see THIRD_PARTY_NOTICES.md).
 - Register the domain (tenvy.app) and check the trademark (EUIPO).

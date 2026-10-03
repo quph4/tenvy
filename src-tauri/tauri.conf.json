@@ -48,7 +48,10 @@
     "shortDescription": "Tenvy – IPTV Player for Windows",
     "longDescription": "Tenvy is a fast IPTV player for Windows. Bring your own M3U or Xtream Codes playlist and get live TV with a full programme guide, movies and series with resume, library-wide search and watch history. Tenvy includes no channels or content.",
     "resources": {
-      "resources/mpv/": "mpv/"
+      "resources/mpv/": "mpv/",
+      "licenses/": "licenses/",
+      "../LICENSE": "licenses/Tenvy-EULA.txt",
+      "../THIRD_PARTY_NOTICES.md": "licenses/THIRD_PARTY_NOTICES.md"
     },
     "windows": {
       "nsis": {

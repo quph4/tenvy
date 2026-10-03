@@ -44,6 +44,45 @@ pub struct MpvHandles {
     pub audio: crate::mpv::InitialAudio,
 }
 
+/// The viewer's language choices, sent with every load.
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TrackPrefs {
+    /// Language of the last audio track picked by hand, e.g. "swe".
+    pub audio_lang: Option<String>,
+    pub sub_lang: Option<String>,
+    /// Subtitles were last switched off.
+    pub subs_off: bool,
+}
+
+impl TrackPrefs {
+    /// mpv file-local options. Track ids go back to automatic for every
+    /// file — "audio track 2" picked on one channel means nothing on the
+    /// next — and the languages steer that automatic pick.
+    pub fn file_options(&self) -> Vec<String> {
+        let mut o = vec![
+            "aid=auto".to_string(),
+            if self.subs_off { "sid=no" } else { "sid=auto" }.to_string(),
+        ];
+        if let Some(l) = self.audio_lang.as_deref().and_then(clean_lang) {
+            o.push(format!("alang={l}"));
+        }
+        if !self.subs_off {
+            if let Some(l) = self.sub_lang.as_deref().and_then(clean_lang) {
+                o.push(format!("slang={l}"));
+            }
+        }
+        o
+    }
+}
+
+/// Language tags only ("sv", "swe", "pt-BR"): nothing that could break
+/// out of mpv's option list.
+fn clean_lang(s: &str) -> Option<&str> {
+    let s = s.trim();
+    (!s.is_empty() && s.len() <= 16 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some(s)
+}
+
 // ---- commands ----
 
 #[tauri::command]
@@ -69,7 +108,9 @@ pub async fn mpv_load(
     state: State<'_, super::AppState>,
     channel_id: i64,
     start_seconds: Option<f64>,
+    prefs: Option<TrackPrefs>,
 ) -> Result<()> {
+    let options = prefs.unwrap_or_default().file_options();
     let db = state.db.clone();
     let playback = tokio::task::spawn_blocking(move || crate::db::get_playback(&db, channel_id))
         .await??
@@ -83,12 +124,13 @@ pub async fn mpv_load(
                 start_seconds,
                 playback.user_agent.as_deref(),
                 playback.referrer.as_deref(),
+                &options,
             )
             .await
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, holder, playback, start_seconds);
+        let _ = (app, holder, playback, start_seconds, options);
         Err(err!("embedded mpv is only supported on Windows right now"))
     }
 }
@@ -102,7 +144,9 @@ pub async fn mpv_load_catchup(
     channel_id: i64,
     start: i64,
     stop: i64,
+    prefs: Option<TrackPrefs>,
 ) -> Result<()> {
+    let options = prefs.unwrap_or_default().file_options();
     let url = super::catchup_url(&state, channel_id, start, stop).await?;
     let db = state.db.clone();
     let playback = tokio::task::spawn_blocking(move || crate::db::get_playback(&db, channel_id))
@@ -112,12 +156,12 @@ pub async fn mpv_load_catchup(
     {
         ensure_mpv(&app, &holder)
             .await?
-            .load(&url, None, playback.user_agent.as_deref(), playback.referrer.as_deref())
+            .load(&url, None, playback.user_agent.as_deref(), playback.referrer.as_deref(), &options)
             .await
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, holder, url, playback);
+        let _ = (app, holder, url, playback, options);
         Err(err!("embedded mpv is only supported on Windows right now"))
     }
 }
@@ -227,6 +271,23 @@ pub async fn mpv_set_geometry(
     }
     #[cfg(not(windows))]
     { let _ = (app, holder, x, y, w, h); Err(err!("windows only")) }
+}
+
+/// Text over the video (channel info, reminders in fullscreen). Does
+/// nothing when mpv isn't running — no point starting it for a message.
+#[tauri::command]
+pub async fn mpv_show_text(holder: State<'_, MpvHolder>, text: String, duration_ms: u32) -> Result<()> {
+    #[cfg(windows)]
+    {
+        let text: String = text.chars().take(500).collect();
+        let mpv = holder.inner.lock().await.as_ref().and_then(|h| h.mpv.clone());
+        match mpv {
+            Some(mpv) if mpv.is_alive() => mpv.show_text(&text, duration_ms.min(30_000)).await,
+            _ => Ok(()),
+        }
+    }
+    #[cfg(not(windows))]
+    { let _ = (holder, text, duration_ms); Err(err!("windows only")) }
 }
 
 #[tauri::command]
@@ -436,4 +497,24 @@ async fn create_child_window(app: &AppHandle) -> Result<isize> {
 
     tracing::info!(target: "tenvy_lib", "mpv child window: child_hwnd={} parent_hwnd={}", child, parent);
     Ok(child)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_prefs_become_file_options() {
+        assert_eq!(TrackPrefs::default().file_options(), ["aid=auto", "sid=auto"]);
+        let p = TrackPrefs { audio_lang: Some("swe".into()), sub_lang: Some("en".into()), subs_off: false };
+        assert_eq!(p.file_options(), ["aid=auto", "sid=auto", "alang=swe", "slang=en"]);
+        let p = TrackPrefs { sub_lang: Some("en".into()), subs_off: true, ..Default::default() };
+        assert_eq!(p.file_options(), ["aid=auto", "sid=no"]);
+    }
+
+    #[test]
+    fn odd_language_tags_are_ignored() {
+        let p = TrackPrefs { audio_lang: Some("sv,sid=1".into()), sub_lang: Some(" ".into()), subs_off: false };
+        assert_eq!(p.file_options(), ["aid=auto", "sid=auto"]);
+    }
 }

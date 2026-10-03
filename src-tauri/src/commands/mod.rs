@@ -418,6 +418,28 @@ pub async fn source_stats(state: State<'_, AppState>, id: i64) -> Result<SourceS
     tokio::task::spawn_blocking(move || db::source_stats(&db, id)).await?
 }
 
+/// One channel by id (e.g. to reopen the last channel at startup);
+/// None if a refresh removed it.
+#[tauri::command]
+pub async fn get_channel(state: State<'_, AppState>, id: i64) -> Result<Option<Channel>> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::get_channel(&db, id)).await?
+}
+
+/// Open the folder with the license texts installed next to Tenvy.
+#[tauri::command]
+pub async fn open_licenses(app: AppHandle) -> Result<()> {
+    use tauri::Manager;
+    use tauri_plugin_opener::OpenerExt;
+    let dir = app
+        .path()
+        .resolve("licenses", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| err!("licenses folder not found: {e}"))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| err!("couldn't open the licenses folder: {e}"))
+}
+
 // ---------- app info ----------
 
 #[derive(serde::Serialize)]

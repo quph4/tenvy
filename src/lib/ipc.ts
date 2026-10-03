@@ -13,6 +13,7 @@ import type {
   Reminder,
   SourceKind,
   SourceStats,
+  TrackPrefs,
   VodDetails,
 } from '../types'
 
@@ -74,6 +75,12 @@ export const ipc = {
   /** Upcoming and ongoing reminders, soonest first. */
   async listReminders(): Promise<Reminder[]> {
     return invoke('list_reminders')
+  },
+  async openLicenses(): Promise<void> {
+    return invoke('open_licenses')
+  },
+  async getChannel(id: number): Promise<Channel | null> {
+    return invoke('get_channel', { id })
   },
   async sourceStats(id: number): Promise<SourceStats> {
     return invoke('source_stats', { id })
@@ -158,13 +165,17 @@ export const ipc = {
     return invoke('mpv_init')
   },
   /** Play a channel by id; the backend resolves its URL and headers. */
-  async mpvLoad(channelId: number, startSeconds: number | null = null): Promise<void> {
-    return invoke('mpv_load', { channelId, startSeconds })
+  async mpvLoad(channelId: number, startSeconds: number | null = null, prefs?: TrackPrefs): Promise<void> {
+    return invoke('mpv_load', { channelId, startSeconds, prefs: prefs ?? null })
   },
   /** Play a past or ongoing programme from the provider's archive.
    *  `start`/`stop` are the programme's epoch seconds from the guide. */
-  async mpvLoadCatchup(channelId: number, start: number, stop: number): Promise<void> {
-    return invoke('mpv_load_catchup', { channelId, start, stop })
+  async mpvLoadCatchup(channelId: number, start: number, stop: number, prefs?: TrackPrefs): Promise<void> {
+    return invoke('mpv_load_catchup', { channelId, start, stop, prefs: prefs ?? null })
+  },
+  /** Text drawn over the video by mpv — visible even in fullscreen. */
+  async mpvShowText(text: string, durationMs = 4000): Promise<void> {
+    return invoke('mpv_show_text', { text, durationMs })
   },
   async mpvSetPause(paused: boolean): Promise<void> {
     return invoke('mpv_set_pause', { paused })

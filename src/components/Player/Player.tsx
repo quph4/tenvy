@@ -12,6 +12,8 @@ import { hhmm } from '../../lib/time'
 import { END_GUARD, useHistory } from '../../stores/history'
 import { useShallow } from 'zustand/react/shallow'
 import { useVideoObscured } from '../../hooks/useVideoObscured'
+import { rememberLastChannel, useTvPrefs } from '../../stores/tvPrefs'
+import { showChannelInfo } from '../../lib/osd'
 
 const DRAWER_WIDTH = 288 // px — tailwind w-72
 /** Wait before retrying a stream that failed to open. */
@@ -37,13 +39,20 @@ function openCurrent(push: (kind: 'error' | 'info', message: string) => void, re
     start = pb.pendingStart
     pb.consumePendingStart()
   }
-  const open = pb.catchup
-    ? ipc.mpvLoadCatchup(channel.id, pb.catchup.start, pb.catchup.stop)
-    : ipc.mpvLoad(channel.id, start)
+  const prefs = useTvPrefs.getState().tracks
+  const catchup = pb.catchup
+  const open = catchup
+    ? ipc.mpvLoadCatchup(channel.id, catchup.start, catchup.stop, prefs)
+    : ipc.mpvLoad(channel.id, start, prefs)
   open
     // mpv's pause flag survives loadfile — a new channel picked while the
     // previous one was paused should still start playing.
     .then(() => ipc.mpvSetPause(false))
+    .then(() => {
+      if (channel.kind !== 'live' || catchup || resume) return
+      rememberLastChannel(channel)
+      showChannelInfo(channel).catch(() => {})
+    })
     .catch((e) => {
       // Surface the real failure — unreachable URL, auth rejection, no
       // catch-up for that time. Without this toast the user clicks a
@@ -326,6 +335,7 @@ export function Player() {
     const n = Number(id)
     if (Number.isFinite(n)) {
       usePlayback.getState().setPreferredAudioTrack(n)
+      useTvPrefs.getState().pickedAudio(audioTracks.find((t) => t.id === n))
       ipc.mpvSetAudioTrack(n).catch(() => {})
     }
     setActivePicker(null)
@@ -333,11 +343,13 @@ export function Player() {
   const onSelectSubtitle = (id: string) => {
     if (id === '__off__') {
       usePlayback.getState().setPreferredSubtitleTrack(null)
+      useTvPrefs.getState().pickedSubtitle(undefined)
       ipc.mpvSetSubtitleTrack(null).catch(() => {})
     } else {
       const n = Number(id)
       if (Number.isFinite(n)) {
         usePlayback.getState().setPreferredSubtitleTrack(n)
+        useTvPrefs.getState().pickedSubtitle(subtitleTracks.find((t) => t.id === n))
         ipc.mpvSetSubtitleTrack(n).catch(() => {})
       }
     }

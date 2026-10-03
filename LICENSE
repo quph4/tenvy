@@ -3,16 +3,17 @@ TENVY END-USER LICENSE AGREEMENT
 Copyright (c) 2026 Tenvy. All rights reserved.
 
 1. GRANT OF LICENSE
-   Subject to the terms of this Agreement and payment of the applicable
-   license fee (after any trial period), Tenvy ("Licensor") grants you
-   ("Licensee") a non-exclusive, non-transferable, revocable license to
-   install and use the Tenvy software ("Software") on up to two (2)
-   personal devices owned or controlled by Licensee.
+   Tenvy ("Licensor") grants you ("Licensee") a free, non-exclusive,
+   non-transferable, revocable license to install and use the Tenvy
+   software ("Software") for personal purposes.
 
-2. TRIAL
-   The Software may be used without a paid license for an evaluation
-   period specified in-app. After the trial period expires, a valid
-   license key is required to continue using the Software.
+2. PRICE AND FUTURE VERSIONS
+   The Software is currently provided free of charge. Voluntary
+   contributions to support its development are welcome but never
+   required, and do not purchase a license, features or support.
+   Licensor may offer future versions, features or services on different
+   terms, including paid ones. Such changes do not apply retroactively to
+   a version Licensee has already installed.
 
 3. RESTRICTIONS
    Licensee shall not: (a) redistribute, sublicense, rent, lease, or sell
@@ -23,9 +24,10 @@ Copyright (c) 2026 Tenvy. All rights reserved.
    rights.
 
 4. CONTENT
-   The Software is a playback client. Licensee is solely responsible for
-   the legality of any playlist, stream, or media accessed through the
-   Software. Licensor does not host, provide, or endorse any content.
+   The Software is a playback client. It does not include, host, provide,
+   sell or endorse any channels, streams or other content. Licensee is
+   solely responsible for the legality of any playlist, stream, or media
+   accessed through the Software.
 
 5. NO WARRANTY
    THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND. TO THE
@@ -44,13 +46,18 @@ Copyright (c) 2026 Tenvy. All rights reserved.
    all copies.
 
 8. THIRD-PARTY COMPONENTS
-   The Software incorporates mpv, Tauri, and other open-source
-   components, each licensed under their respective terms. See the
-   third-party notices included with the distribution.
+   The Software is distributed together with mpv and uses Tauri and other
+   open-source components, each licensed under its own terms, which
+   prevail for those components. Nothing in this Agreement limits rights
+   granted by those licenses. See THIRD_PARTY_NOTICES.md and the license
+   texts in the "licenses" folder of the installation.
 
-9. GOVERNING LAW
+9. PRIVACY
+   See the privacy policy: https://quph4.github.io/tenvy-releases/privacy.html
+
+10. GOVERNING LAW
    This Agreement shall be governed by the laws applicable at the
    Licensor's place of business, without regard to conflict-of-law
    principles.
 
-For license purchases and support, contact: [CONTACT EMAIL TBD]
+Contact and support: https://github.com/quph4/tenvy-releases/issues

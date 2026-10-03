@@ -5,6 +5,10 @@ import { useUI } from '../stores/ui'
 import { useToast } from '../stores/toast'
 import { ipc } from '../lib/ipc'
 import { openInExternalPlayer } from '../lib/externalPlayer'
+import { liveChannels, osd } from '../lib/osd'
+
+/** Wait this long after the last digit before switching channel. */
+const DIGIT_WAIT_MS = 1500
 
 /**
  * Global keyboard shortcuts. Mounted once from App.
@@ -18,7 +22,10 @@ import { openInExternalPlayer } from '../lib/externalPlayer'
  *   M        mute
  *   X        open current channel in external player (mpv / VLC)
  *   J / L    seek -10s / +10s (VOD only)
- *   ↑ / ↓    prev/next channel (live, player view)
+ *   ↑ / ↓    prev/next channel (live, player view; also PgUp/PgDn)
+ *   0–9      go to channel number (live, player view)
+ *   Backspace  back to the previous channel
+ *   Enter    in fullscreen: the action of the latest notice ("Watch now")
  *   ← / →    volume down/up
  *
  * State is read with `getState()` at key time rather than subscribed to:
@@ -27,6 +34,19 @@ import { openInExternalPlayer } from '../lib/externalPlayer'
  */
 export function useKeyboardShortcuts() {
   useEffect(() => {
+    // Digits typed so far for "go to channel 12".
+    let digits = ''
+    let digitTimer: ReturnType<typeof setTimeout> | undefined
+    const commitDigits = () => {
+      clearTimeout(digitTimer)
+      const n = Number(digits)
+      digits = ''
+      const list = liveChannels()
+      const target = list[n - 1]
+      if (target) usePlayback.getState().play(target)
+      else osd(`No channel ${n}`, 1500)
+    }
+
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
       const typing =
@@ -52,7 +72,44 @@ export function useKeyboardShortcuts() {
 
       if (typing) return
 
+      // Channel numbers: live TV in the player view (or fullscreen).
+      if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const live = usePlaylist.getState().activeKind === 'live' || channel?.kind === 'live'
+        if (!live || ui.view !== 'player') return
+        if (!digits && e.key === '0') return
+        e.preventDefault()
+        digits = (digits + e.key).slice(0, 4)
+        osd(`${digits}–`, DIGIT_WAIT_MS + 300)
+        clearTimeout(digitTimer)
+        digitTimer = setTimeout(commitDigits, DIGIT_WAIT_MS)
+        return
+      }
+
       switch (e.key.toLowerCase()) {
+        case 'enter': {
+          if (digits) {
+            e.preventDefault()
+            commitDigits()
+            return
+          }
+          // In fullscreen notices appear on the video; Enter answers the
+          // latest one that offers something ("Watch now").
+          if (!pb.fullscreen) return
+          const toasts = useToast.getState()
+          const t = [...toasts.items].reverse().find((x) => x.action)
+          if (!t?.action) return
+          e.preventDefault()
+          t.action.run()
+          toasts.dismiss(t.id)
+          break
+        }
+        case 'backspace': {
+          const prev = pb.previous
+          if (!prev || channel?.kind !== 'live' || ui.view !== 'player') return
+          e.preventDefault()
+          pb.play(prev)
+          break
+        }
         case 'g':
           e.preventDefault()
           ui.setView(ui.view === 'epg' ? 'player' : 'epg')
@@ -100,7 +157,11 @@ export function useKeyboardShortcuts() {
           break
         }
         case 'arrowup':
-        case 'arrowdown': {
+        case 'arrowdown':
+        case 'pageup':
+        case 'pagedown':
+        case 'channelup':
+        case 'channeldown': {
           // Channel zapping only makes sense for live TV in the player
           // view; in the guide the arrows should scroll.
           if (!channel || channel.kind !== 'live' || ui.view !== 'player') return
@@ -110,7 +171,7 @@ export function useKeyboardShortcuts() {
           const i = channels.findIndex((c) => c.id === channel.id)
           if (i === -1) return
           e.preventDefault()
-          const step = e.key.toLowerCase() === 'arrowup' ? -1 : 1
+          const step = ['arrowup', 'pageup', 'channelup'].includes(e.key.toLowerCase()) ? -1 : 1
           pb.play(channels[(i + step + channels.length) % channels.length])
           break
         }
@@ -123,6 +184,9 @@ export function useKeyboardShortcuts() {
       }
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      clearTimeout(digitTimer)
+    }
   }, [])
 }

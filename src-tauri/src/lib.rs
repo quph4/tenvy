@@ -89,6 +89,8 @@ pub fn run() {
             commands::list_reminders,
             commands::source_stats,
             commands::app_info,
+            commands::get_channel,
+            commands::open_licenses,
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,
@@ -115,6 +117,7 @@ pub fn run() {
             commands::mpv_state::mpv_set_subtitle_track,
             commands::mpv_state::mpv_set_geometry,
             commands::mpv_state::mpv_stop,
+            commands::mpv_state::mpv_show_text,
             commands::mpv_state::mpv_get_state,
         ])
         .run(tauri::generate_context!())

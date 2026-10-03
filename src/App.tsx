@@ -22,7 +22,9 @@ import { startUpdateChecks } from './stores/updater'
 import { startReminderScheduler } from './stores/reminders'
 import { openSupportLink, startAppInfo, useAppInfo } from './stores/appInfo'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
-import { subscribe } from './lib/ipc'
+import { ipc, subscribe } from './lib/ipc'
+import { startToastMirror } from './lib/osd'
+import { lastChannelId, useTvPrefs } from './stores/tvPrefs'
 import { Heart } from 'lucide-react'
 
 function App() {
@@ -39,9 +41,17 @@ function App() {
   const watchingVod = usePlayback((s) => !!s.channel && s.channel.kind !== 'live')
 
   useEffect(() => {
-    hydrate().catch(() => {
-      /* first run — no sources yet */
-    })
+    hydrate()
+      .then(async () => {
+        // Optionally pick up where the viewer left off, like a TV.
+        const id = lastChannelId()
+        if (!useTvPrefs.getState().startWithLastChannel || id == null) return
+        const ch = await ipc.getChannel(id)
+        if (ch && !usePlayback.getState().channel) usePlayback.getState().play(ch)
+      })
+      .catch(() => {
+        /* first run — no sources yet */
+      })
     // Warm the progress map so the first paint of any channel list
     // already has badges/stripes. Failure is non-fatal — rows just
     // render without history adornments until the user plays something.
@@ -63,6 +73,7 @@ function App() {
   useEffect(() => startUpdateChecks(), [])
   useEffect(() => startReminderScheduler(), [])
   useEffect(() => startAppInfo(), [])
+  useEffect(() => startToastMirror(), [])
   const support = useAppInfo((s) => s.info?.config.support ?? null)
 
   useKeyboardShortcuts()
@@ -115,6 +126,10 @@ function App() {
         <span>
           <span className="kbd mr-1">P</span>
           Mini player
+        </span>
+        <span>
+          <span className="kbd mr-1">0–9</span>
+          Channel
         </span>
         {support && (
           <button

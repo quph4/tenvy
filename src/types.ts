@@ -149,3 +149,10 @@ export interface AppInfo {
   installedAt: number
   config: RemoteConfig
 }
+
+/** Remembered language choices, sent with every load (Rust TrackPrefs). */
+export interface TrackPrefs {
+  audioLang: string | null
+  subLang: string | null
+  subsOff: boolean
+}

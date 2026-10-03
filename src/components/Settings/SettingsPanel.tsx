@@ -3,10 +3,12 @@ import { useUI } from '../../stores/ui'
 import { usePlaylist } from '../../stores/playlist'
 import { useIngest } from '../../stores/ingest'
 import { ipc } from '../../lib/ipc'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { useToast } from '../../stores/toast'
 import { useUpdater } from '../../stores/updater'
 import { useReminders } from '../../stores/reminders'
 import { openSupportLink, useAppInfo } from '../../stores/appInfo'
+import { languageName, useTvPrefs } from '../../stores/tvPrefs'
 import { hhmm, weekday } from '../../lib/time'
 
 export function SettingsPanel() {
@@ -110,6 +112,7 @@ export function SettingsPanel() {
           </ul>
         </div>
 
+        <PlaybackSection />
         <RemindersSection />
         <AboutSection />
       </aside>
@@ -161,6 +164,17 @@ function AboutSection() {
           </button>
         )}
       </div>
+      <div className="mt-3 flex gap-4 text-[11px]">
+        <button onClick={() => ipc.openLicenses().catch(() => {})} className="text-neutral-500 hover:text-neutral-300">
+          Open-source licenses
+        </button>
+        <button
+          onClick={() => openUrl('https://quph4.github.io/tenvy-releases/privacy.html').catch(() => {})}
+          className="text-neutral-500 hover:text-neutral-300"
+        >
+          Privacy
+        </button>
+      </div>
       {support && (
         <div className="mt-4 flex items-center gap-3 rounded-lg border border-accent-500/20 bg-accent-400/5 px-3 py-2.5">
           <Heart className="h-4 w-4 shrink-0 text-accent-400" />
@@ -175,6 +189,47 @@ function AboutSection() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+function PlaybackSection() {
+  const { tracks, startWithLastChannel, setStartWithLastChannel, resetTracks } = useTvPrefs()
+  const audio = languageName(tracks.audioLang)
+  const subs = tracks.subsOff ? 'Off' : languageName(tracks.subLang)
+  return (
+    <div className="border-t border-neutral-800 p-5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Playback</span>
+      <label className="mt-3 flex cursor-pointer items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-neutral-200">Start with the last channel</span>
+          <span className="block text-[11px] text-neutral-500">Tune in to what you watched last when Tenvy opens.</span>
+        </span>
+        <input
+          type="checkbox"
+          checked={startWithLastChannel}
+          onChange={(e) => setStartWithLastChannel(e.target.checked)}
+          className="h-4 w-4 accent-[#D4B47C]"
+        />
+      </label>
+      <div className="mt-4 flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm text-neutral-200">Languages</div>
+          <div className="text-[11px] text-neutral-500">
+            {audio || subs
+              ? `Audio: ${audio ?? 'automatic'} · Subtitles: ${subs ?? 'automatic'} — from your last choice.`
+              : 'Pick an audio or subtitle language once and Tenvy uses it everywhere.'}
+          </div>
+        </div>
+        {(audio || subs) && (
+          <button
+            onClick={resetTracks}
+            className="inline-flex h-7 shrink-0 items-center rounded-md border border-neutral-800 px-2.5 text-xs text-neutral-300 hover:border-neutral-700"
+          >
+            Reset
+          </button>
+        )}
+      </div>
     </div>
   )
 }
