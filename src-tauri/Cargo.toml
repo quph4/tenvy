@@ -1,0 +1,72 @@
+[package]
+name = "lumen"
+version = "0.1.0"
+description = "Desktop IPTV player with EPG, watch history, and embedded mpv."
+authors = ["Lumen"]
+license = "LicenseRef-Proprietary"
+edition = "2021"
+publish = false
+
+[lib]
+name = "lumen_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json", "stream"] }
+
+rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+
+quick-xml = { version = "0.36", features = ["serialize"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+url = "2"
+
+# VOD container probing. IPTV panels' `get_vod_info` only exposes the default
+# audio track, so we range-GET the first few MB of the container itself and
+# parse the track list. Matroska covers the overwhelming majority of IPTV
+# VOD; mp4 covers the rest.
+matroska = "0.30"
+mp4 = "0.14"
+
+# mpv embedding. We launch `mpv.exe` as a child process with --wid set to a
+# native child HWND we create inside the Tauri window, and talk to it over
+# a Windows named pipe using mpv's JSON IPC protocol. This path sidesteps
+# the libmpv build toolchain (no MPV_SOURCE env, no .lib/.dll.a files), and
+# still gives us full HEVC/AC-3/DTS/MKV track-switch support because mpv
+# itself is doing the decoding.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Gdi",
+] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+opt-level = "s"
+panic = "abort"

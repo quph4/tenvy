@@ -1,0 +1,47 @@
+@import '@fontsource-variable/inter';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full m-0 overflow-hidden bg-zinc-950 text-zinc-100 font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11', 'ss01';
+  }
+
+  /* No native scrollbar nonsense — slim and dark */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(39 39 42); /* zinc-800 */
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(63 63 70); /* zinc-700 */
+  }
+
+  /* Hide default focus outline; we add our own accent rings where needed */
+  :focus {
+    outline: none;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-zinc-900/60 border border-zinc-800/70 backdrop-blur-sm;
+  }
+  .row-hover {
+    @apply transition-colors duration-100 hover:bg-zinc-800/60;
+  }
+  .kbd {
+    @apply inline-flex items-center rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400;
+  }
+}
