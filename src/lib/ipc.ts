@@ -7,7 +7,6 @@ import type {
   HistoryEntry,
   HistoryProgress,
   MpvState,
-  ProbedTracks,
   Programme,
   Source,
   SourceKind,
@@ -46,17 +45,21 @@ export const ipc = {
   }): Promise<Channel[]> {
     return invoke('list_channels', args)
   },
-  async searchChannels(query: string, kind: ChannelKind | null): Promise<Channel[]> {
-    return invoke('search_channels', { query, kind })
+  /** Substring search across every group (top-level rows only). */
+  async searchChannels(
+    query: string,
+    opts: { sourceId?: number | null; kind?: ChannelKind | null } = {},
+  ): Promise<Channel[]> {
+    return invoke('search_channels', {
+      query,
+      sourceId: opts.sourceId ?? null,
+      kind: opts.kind ?? null,
+    })
   },
-
-  /**
-   * Ask the backend what audio/subtitle tracks live inside a VOD's container.
-   * For Xtream sources this hits `get_vod_info`; for generic M3U it returns
-   * empty. Results are cached server-side for 10 min.
-   */
-  async probeTracks(channelId: number): Promise<ProbedTracks> {
-    return invoke('probe_tracks', { channelId })
+  /** Episodes of a series container (`channel.container`), in order.
+   *  Fetched from the provider each call, served from cache offline. */
+  async listEpisodes(channelId: number): Promise<Channel[]> {
+    return invoke('list_episodes', { channelId })
   },
 
   // ---- Watch history ----
@@ -102,13 +105,10 @@ export const ipc = {
     return invoke('current_programme', { tvgId })
   },
 
-  async logError(msg: string): Promise<void> {
-    return invoke('log_error', { msg })
-  },
   /**
    * Launch the URL in mpv/VLC. Optionally pre-select audio/subtitle tracks
-   * by MKV track number — the backend turns these into mpv `--aid` /
-   * `--sid` flags (or VLC `--audio-track` / `--sub-track`). Pass `null`
+   * by mpv track id — the backend turns these into mpv `--aid` / `--sid`
+   * flags (or VLC's 0-based `--audio-track` / `--sub-track`). Pass `null`
    * to keep the player's defaults; pass a number to force that track.
    * Returns the path of the external player that was launched.
    */

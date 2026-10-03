@@ -22,7 +22,7 @@ export function Topbar() {
         className="group ml-2 flex h-8 flex-1 max-w-md items-center gap-2 rounded-md border border-zinc-800 bg-zinc-900/80 px-3 text-left text-sm text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-400"
       >
         <Search className="h-4 w-4 shrink-0" />
-        <span className="flex-1 truncate">Search channels and programmes…</span>
+        <span className="flex-1 truncate">Search channels, movies and series…</span>
         <span className="kbd">Ctrl K</span>
       </button>
 

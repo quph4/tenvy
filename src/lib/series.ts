@@ -55,6 +55,9 @@ export interface Show {
   logo: string | null
   group: string | null
   episodes: Episode[]
+  /** Set for provider-structured series (Xtream): the show's own row.
+   *  `episodes` is empty until loaded with `ipc.listEpisodes`. */
+  container: Channel | null
 }
 
 export interface Episode {
@@ -73,6 +76,20 @@ export function groupByShow(channels: Channel[]): Show[] {
   const shows = new Map<string, Show>()
 
   for (const ch of channels) {
+    // Provider-structured series are already one row per show.
+    if (ch.container) {
+      const key = `c:${ch.id}`
+      shows.set(key, {
+        key,
+        name: ch.name,
+        logo: ch.logo,
+        group: ch.group,
+        episodes: [],
+        container: ch,
+      })
+      continue
+    }
+
     const info = parseEpisode(ch.name)
     const showName = info?.show ?? ch.name
     const key = showName.toLowerCase()
@@ -85,16 +102,12 @@ export function groupByShow(channels: Channel[]): Show[] {
         logo: ch.logo ?? null,
         group: ch.group ?? null,
         episodes: [],
+        container: null,
       }
       shows.set(key, show)
     }
 
-    show.episodes.push({
-      channel: ch,
-      season: info?.season ?? 0,
-      episode: info?.episode ?? 0,
-      subtitle: info?.subtitle ?? null,
-    })
+    show.episodes.push(toEpisode(ch))
   }
 
   for (const s of shows.values()) {
@@ -102,4 +115,19 @@ export function groupByShow(channels: Channel[]): Show[] {
   }
 
   return Array.from(shows.values()).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Episode view of a channel row. Provider-structured episodes carry their
+ * season/episode numbers; for everything else they're parsed out of the
+ * name. The name minus its marker becomes the episode title.
+ */
+export function toEpisode(ch: Channel): Episode {
+  const info = parseEpisode(ch.name)
+  return {
+    channel: ch,
+    season: ch.season ?? info?.season ?? 0,
+    episode: ch.episode ?? info?.episode ?? 0,
+    subtitle: info ? info.subtitle : ch.parentId != null ? ch.name : null,
+  }
 }

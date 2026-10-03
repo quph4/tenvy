@@ -1,49 +1,38 @@
 pub mod mpv_state;
 
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::db::{self, Db};
+use crate::err;
 use crate::error::Result;
 use crate::models::{
     AddSourceReq, Channel, Group, HistoryEntry, HistoryProgress, PlaylistProgress, Programme,
     Source, SourceKind,
 };
-use crate::sources::xtream::{parse_xtream_url, ProbedTracks, Xtream};
-use crate::sources::{container, m3u, xmltv};
-use crate::err;
+use crate::sources::xtream::{self, Xtream};
+use crate::sources::{m3u, xmltv};
 
 // Everything that lives on the Tauri app as state.
 pub struct AppState {
     pub db: Db,
     pub http: reqwest::Client,
-    /// `get_vod_info` responses keyed by channel id. Probing hits the
-    /// provider with an HTTP roundtrip, and users flip between movies/
-    /// episodes fast — caching for a few minutes keeps the picker snappy
-    /// without serving truly stale data (track layout doesn't change).
-    pub probe_cache: Mutex<HashMap<i64, CachedProbe>>,
 }
-
-pub struct CachedProbe {
-    pub at: Instant,
-    pub tracks: ProbedTracks,
-}
-
-const PROBE_TTL: Duration = Duration::from_secs(600);
 
 impl AppState {
     pub fn new(db: Db) -> Self {
         Self {
             db,
             http: reqwest::Client::builder()
-                .user_agent("Lumen/0.1")
-                .timeout(std::time::Duration::from_secs(60))
+                .user_agent(concat!("Lumen/", env!("CARGO_PKG_VERSION")))
+                // No overall timeout: big playlists and XMLTV files on slow
+                // links legitimately take minutes. Instead give up on a
+                // dead connection or a stalled transfer.
+                .connect_timeout(Duration::from_secs(15))
+                .read_timeout(Duration::from_secs(60))
                 .build()
                 .expect("http client"),
-            probe_cache: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -62,26 +51,24 @@ pub async fn add_source(
     state: State<'_, AppState>,
     req: AddSourceReq,
 ) -> Result<Source> {
+    let AddSourceReq { mut kind, name, mut url, mut username, mut password } = req;
+
+    // An Xtream "M3U plus" link pasted into the M3U tab: import it through
+    // the Xtream API instead, which adds series, cleaner categories and
+    // the provider's guide.
+    if matches!(kind, SourceKind::M3u) {
+        if let Some((host, u, p)) = xtream::credentials_from_m3u_url(&url) {
+            kind = SourceKind::Xtream;
+            url = host;
+            username = Some(u);
+            password = Some(p);
+        }
+    }
+
     // Insert the row first so we have an id to refresh under.
     let db = state.db.clone();
-    let kind = req.kind.clone();
-    let name = req.name.clone();
-    let url = req.url.clone();
-    let username = req.username.clone();
-    let password = req.password.clone();
-
-    let id = tokio::task::spawn_blocking({
-        let db = db.clone();
-        move || {
-            db::insert_source(
-                &db,
-                &kind,
-                &name,
-                &url,
-                username.as_deref(),
-                password.as_deref(),
-            )
-        }
+    let id = tokio::task::spawn_blocking(move || {
+        db::insert_source(&db, &kind, &name, &url, username.as_deref(), password.as_deref())
     })
     .await??;
 
@@ -145,12 +132,21 @@ async fn ingest(app: &AppHandle, state: &State<'_, AppState>, id: i64) -> Result
 async fn ingest_m3u(app: &AppHandle, state: &State<'_, AppState>, source: &Source) -> Result<()> {
     let body = fetch_text(&state.http, &source.url).await?;
     emit_progress(app, source.id, "parsing", 0);
-    let channels = tokio::task::spawn_blocking(move || m3u::parse(&body)).await??;
+    let (channels, guide_url) = tokio::task::spawn_blocking(move || {
+        let guide = m3u::header_guide_url(&body);
+        m3u::parse(&body).map(|c| (c, guide))
+    })
+    .await??;
     let count = channels.len() as i64;
     emit_progress(app, source.id, "storing", count);
     let db = state.db.clone();
     let sid = source.id;
     tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, &channels)).await??;
+
+    // `#EXTM3U url-tvg="…"` names the playlist's own guide.
+    if let Some(url) = guide_url {
+        refresh_guide_in_background(app.clone(), state.db.clone(), state.http.clone(), url, sid);
+    }
     Ok(())
 }
 
@@ -161,13 +157,20 @@ async fn ingest_xtream(
     username: &str,
     password: &str,
 ) -> Result<()> {
-    let xt = Xtream::new(&source.url, username, password)?;
-    let channels = xt.fetch_channels().await?;
-    let count = channels.len() as i64;
-    emit_progress(app, source.id, "storing", count);
+    let xt = Xtream::new(&source.url, username, password, state.http.clone())?;
+    let catalogue = xt.fetch_catalogue().await?;
+    tracing::info!(
+        target: "lumen_lib",
+        "xtream catalogue: {} live, {} movies, {} series",
+        catalogue.live, catalogue.movies, catalogue.series
+    );
+    emit_progress(app, source.id, "storing", catalogue.channels.len() as i64);
     let db = state.db.clone();
     let sid = source.id;
-    tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, &channels)).await??;
+    tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, &catalogue.channels)).await??;
+
+    // The provider's guide can be tens of MB; don't hold the UI for it.
+    refresh_guide_in_background(app.clone(), state.db.clone(), state.http.clone(), xt.xmltv_url(), sid);
     Ok(())
 }
 
@@ -186,27 +189,46 @@ async fn ingest_xmltv(
     Ok(())
 }
 
-async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String> {
-    if let Some(path) = url.strip_prefix("file://").or_else(|| {
-        // Treat non-http paths as local files (Windows-friendly)
-        if url.starts_with("http://") || url.starts_with("https://") {
-            None
-        } else {
-            Some(url)
+/// Download and store a guide without blocking the caller. Emits
+/// `guide-updated` (with the source id) when new programmes are in. A
+/// failure only costs guide data, so it's logged rather than surfaced.
+fn refresh_guide_in_background(app: AppHandle, db: Db, http: reqwest::Client, url: String, source_id: i64) {
+    tokio::spawn(async move {
+        let result: Result<usize> = async {
+            let bytes = fetch_bytes(&http, &url).await?;
+            let programmes = tokio::task::spawn_blocking(move || xmltv::parse(&bytes)).await??;
+            tokio::task::spawn_blocking(move || db::upsert_programmes(&db, &programmes)).await?
         }
-    }) {
-        let bytes = tokio::fs::read(path).await?;
-        return String::from_utf8(bytes).map_err(|e| err!("Invalid UTF-8 in playlist: {}", e));
-    }
-    let resp = client.get(url).send().await?.error_for_status()?;
-    Ok(resp.text().await?)
+        .await;
+        match result {
+            Ok(n) => {
+                tracing::info!(target: "lumen_lib", "guide for source {}: {} programmes", source_id, n);
+                let _ = app.emit("guide-updated", source_id);
+            }
+            Err(e) => tracing::warn!(
+                target: "lumen_lib",
+                "guide for source {} ({}) failed: {}",
+                source_id,
+                crate::sources::stream_url::redact(&url),
+                e
+            ),
+        }
+    });
 }
 
+async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String> {
+    let bytes = fetch_bytes(client, url).await?;
+    // Tolerate the odd Latin-1 byte rather than rejecting a whole playlist.
+    Ok(String::from_utf8(bytes)
+        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()))
+}
+
+/// Fetch a remote URL, or read a local file for anything that isn't
+/// http(s) — users can point a source at a playlist on disk.
 async fn fetch_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>> {
     if !url.starts_with("http://") && !url.starts_with("https://") {
         let path = url.strip_prefix("file://").unwrap_or(url);
-        let bytes = tokio::fs::read(path).await?;
-        return Ok(bytes);
+        return Ok(tokio::fs::read(path).await?);
     }
     let resp = client.get(url).send().await?.error_for_status()?;
     Ok(resp.bytes().await?.to_vec())
@@ -253,103 +275,60 @@ pub async fn list_channels(
 pub async fn search_channels(
     state: State<'_, AppState>,
     query: String,
+    source_id: Option<i64>,
     kind: Option<String>,
 ) -> Result<Vec<Channel>> {
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || db::search_channels(&db, &query, kind.as_deref())).await?
+    tokio::task::spawn_blocking(move || {
+        db::search_channels(&db, &query, source_id, kind.as_deref())
+    })
+    .await?
 }
 
-// ---------- track probe ----------
-
-/// Ask the provider what audio/subtitle tracks live inside a VOD file.
-///
-/// WebView2 can't enumerate alternate tracks for out-of-tree MKV containers,
-/// so the baseline `<video>.audioTracks` is always a single "Default" entry.
-/// Xtream panels, however, stash the ffprobe output of every movie in their
-/// `get_vod_info` endpoint — pulling that lets the picker display the real
-/// track list even though we still can't switch them in-app (mpv/VLC via
-/// the X key is the switch path).
-///
-/// Returns empty arrays for non-Xtream URLs or when the panel 404s the vod
-/// id — the frontend treats that the same as "no extras known."
+/// Episodes of a series container. Fetched fresh from the provider each
+/// time (one request) and synced into the DB so episode ids — and their
+/// history — stay stable; falls back to the stored list when offline.
 #[tauri::command]
-pub async fn probe_tracks(
-    state: State<'_, AppState>,
-    channel_id: i64,
-) -> Result<ProbedTracks> {
-    // Cache hit → don't hammer the panel every time the user reopens the
-    // picker on the same movie.
-    if let Some(hit) = state.probe_cache.lock().unwrap().get(&channel_id) {
-        if hit.at.elapsed() < PROBE_TTL {
-            return Ok(hit.tracks.clone());
-        }
+pub async fn list_episodes(state: State<'_, AppState>, channel_id: i64) -> Result<Vec<Channel>> {
+    let db = state.db.clone();
+    let show = tokio::task::spawn_blocking(move || db::get_channel(&db, channel_id))
+        .await??
+        .ok_or_else(|| err!("Series not found"))?;
+    if !show.container {
+        return Err(err!("{} is not a series", show.name));
     }
+
+    let fetched: Result<Vec<db::ChannelInsert>> = async {
+        let series_id = xtream::parse_xtream_url(&show.stream_url)
+            .ok_or_else(|| err!("Series has no Xtream id"))?
+            .stream_id;
+        let db = state.db.clone();
+        let sid = show.source_id;
+        let (source, user, pass) =
+            tokio::task::spawn_blocking(move || db::get_source_credentials(&db, sid)).await??;
+        let xt = Xtream::new(
+            &source.url,
+            user.as_deref().unwrap_or(""),
+            pass.as_deref().unwrap_or(""),
+            state.http.clone(),
+        )?;
+        xt.fetch_episodes(series_id).await
+    }
+    .await;
 
     let db = state.db.clone();
-    let channel = tokio::task::spawn_blocking(move || db::get_channel(&db, channel_id))
-        .await??
-        .ok_or_else(|| err!("channel {} not found", channel_id))?;
-
-    // Only VOD probes are meaningful — live streams don't have a static
-    // container to enumerate.
-    if channel.kind != "movie" && channel.kind != "series" {
-        return Ok(ProbedTracks {
-            provider: "none".into(),
-            ..Default::default()
-        });
-    }
-
-    // Xtream `get_vod_info` (when this is an Xtream URL) — cheap metadata
-    // call that's often wrong: standard panels only report the default audio
-    // track and no subtitles. We use it as a hint, then fall through to a
-    // direct container probe when it's obviously incomplete.
-    let xtream_tracks = if let Some(parsed) = parse_xtream_url(&channel.stream_url) {
-        match Xtream::new(&parsed.host, &parsed.username, &parsed.password) {
-            Ok(xt) => xt.probe_vod(parsed.stream_id).await.unwrap_or_else(|e| {
-                tracing::warn!(target: "lumen_lib", "probe_vod failed for channel {}: {}", channel_id, e);
-                ProbedTracks { provider: "xtream".into(), ..Default::default() }
-            }),
-            Err(_) => ProbedTracks::default(),
+    match fetched {
+        Ok(eps) => tokio::task::spawn_blocking(move || db::replace_episodes(&db, channel_id, &eps)).await?,
+        Err(e) => {
+            let cached = tokio::task::spawn_blocking(move || db::list_episodes(&db, channel_id)).await??;
+            if cached.is_empty() {
+                Err(e)
+            } else {
+                tracing::warn!(target: "lumen_lib", "episodes for {} served from cache: {}", channel_id, e);
+                Ok(cached)
+            }
         }
-    } else {
-        ProbedTracks::default()
-    };
-
-    // Container probe: range-GET the file and demux the track list. This is
-    // the authoritative source — ffprobe-equivalent — for everything the
-    // Xtream panel hides (additional audio tracks, subtitles, commentary).
-    // Costs a few MB of bandwidth per movie, cached for 10 minutes.
-    let container_tracks = container::probe_url(&state.http, &channel.stream_url)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(target: "lumen_lib", "container probe failed for channel {}: {}", channel_id, e);
-            ProbedTracks::default()
-        });
-
-    // Prefer whichever source found more tracks. Container probe wins ties
-    // because it sees the real file; Xtream wins only when the container
-    // probe came back empty (range requests blocked, unknown format).
-    let container_total = container_tracks.audio.len() + container_tracks.subtitle.len();
-    let xtream_total = xtream_tracks.audio.len() + xtream_tracks.subtitle.len();
-    let tracks = if container_total >= xtream_total && container_total > 0 {
-        container_tracks
-    } else if xtream_total > 0 {
-        xtream_tracks
-    } else {
-        // Nothing worked — surface the container probe's empty result so the
-        // UI can still show "no extra tracks" without a confusing "xtream"
-        // provider tag when the URL wasn't even Xtream.
-        ProbedTracks { provider: "none".into(), ..Default::default() }
-    };
-
-    state.probe_cache.lock().unwrap().insert(
-        channel_id,
-        CachedProbe {
-            at: Instant::now(),
-            tracks: tracks.clone(),
-        },
-    );
-    Ok(tracks)
+    }
 }
 
 // ---------- favorites ----------
@@ -511,33 +490,6 @@ pub async fn open_external(
             subtitle_track
         );
         Ok(player.to_string_lossy().into_owned())
-    })
-    .await?
-}
-
-// ---------- diagnostics ----------
-
-// Append a line to %APPDATA%/com.lumen.app/lumen.log. Used by the frontend
-// to capture playback failures that only surface inside the webview (hls.js
-// fatals, CORS rejections, <video> error codes) so we can actually see them.
-#[tauri::command]
-pub async fn log_error(app: AppHandle, msg: String) -> Result<()> {
-    use std::io::Write;
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| err!("no app data dir: {}", e))?;
-    tokio::task::spawn_blocking(move || -> Result<()> {
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join("lumen.log");
-        let ts = chrono::Utc::now().to_rfc3339();
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        writeln!(f, "[{ts}] {msg}")?;
-        tracing::warn!(target: "lumen_lib", "{}", msg);
-        Ok(())
     })
     .await?
 }

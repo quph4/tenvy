@@ -24,8 +24,6 @@ pub enum Error {
     Url(#[from] url::ParseError),
     #[error(transparent)]
     SerdeJson(#[from] serde_json::Error),
-    #[error(transparent)]
-    Anyhow(#[from] anyhow::Error),
 }
 
 impl From<reqwest::Error> for Error {

@@ -55,7 +55,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let dir = app
                 .path()
@@ -79,12 +78,11 @@ pub fn run() {
             commands::list_groups,
             commands::list_channels,
             commands::search_channels,
-            commands::probe_tracks,
+            commands::list_episodes,
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,
             commands::current_programme,
-            commands::log_error,
             commands::open_external,
             commands::record_history,
             commands::list_history,

@@ -7,7 +7,7 @@ import { useHistory, isResumable, fmtResume } from '../stores/history'
 import { ipc } from '../lib/ipc'
 import { useToast } from '../stores/toast'
 import { cn } from '../lib/cn'
-import { groupByShow, type Episode, type Show } from '../lib/series'
+import { groupByShow, toEpisode, type Episode, type Show } from '../lib/series'
 import { usePref } from '../lib/prefs'
 import type { Channel, HistoryProgress, Programme } from '../types'
 import { Trash2 } from 'lucide-react'
@@ -27,15 +27,11 @@ export function ChannelList() {
   const requestPlay = usePlayback((s) => s.requestPlay)
   const isHistory = activeGroup === HISTORY_GROUP
   const play = requestPlay
-  const [openShowKey, setOpenShowKey] = useState<string | null>(null)
+  // Lives in the store (and is reset there on group/kind changes) so that
+  // search can open a show directly.
+  const openShowKey = usePlaylist((s) => s.openShowKey)
+  const setOpenShowKey = usePlaylist((s) => s.setOpenShowKey)
   const [sort, setSort] = usePref<SortMode>('lumen.channels.sort', 'added')
-
-  // Reset the drilldown whenever the user changes group/kind, otherwise the
-  // open show from a previous category can "leak" into a new filter where
-  // it no longer exists.
-  useEffect(() => {
-    setOpenShowKey(null)
-  }, [activeGroup, activeKind])
 
   const sortedChannels = useMemo(() => sortChannels(channels, sort), [channels, sort])
 
@@ -45,6 +41,8 @@ export function ChannelList() {
     [isSeries, sortedChannels, sort],
   )
   const openShow = isSeries && openShowKey ? shows.find((s) => s.key === openShowKey) ?? null : null
+  const remote = useRemoteEpisodes(openShow?.container ?? null)
+  const openEpisodes = openShow?.container ? remote.episodes : openShow?.episodes ?? []
 
   const label =
     openShow?.name ??
@@ -56,7 +54,7 @@ export function ChannelList() {
 
   const totalCount = isSeries
     ? openShow
-      ? openShow.episodes.length
+      ? openEpisodes.length
       : shows.length
     : sortedChannels.length
 
@@ -98,16 +96,26 @@ export function ChannelList() {
           onOpen={(s) => {
             // If a show has exactly one episode there's nothing to drill
             // into — just play it straight from the roll-up.
-            if (s.episodes.length === 1) play(s.episodes[0].channel)
+            if (!s.container && s.episodes.length === 1) play(s.episodes[0].channel)
             else setOpenShowKey(s.key)
           }}
         />
       ) : isSeries && openShow ? (
-        <EpisodeList
-          episodes={openShow.episodes}
-          currentChannelId={current?.id ?? null}
-          onPlay={play}
-        />
+        openShow.container && remote.loading && openEpisodes.length === 0 ? (
+          <ListSkeleton />
+        ) : openShow.container && remote.error && openEpisodes.length === 0 ? (
+          <div className="grid flex-1 place-items-center px-6 text-center text-sm text-zinc-500">
+            Couldn't load episodes.
+            <br />
+            <span className="text-xs text-zinc-600">{remote.error}</span>
+          </div>
+        ) : (
+          <EpisodeList
+            episodes={openEpisodes}
+            currentChannelId={current?.id ?? null}
+            onPlay={play}
+          />
+        )
       ) : (
         <FlatList
           channels={sortedChannels}
@@ -132,12 +140,46 @@ function sortChannels(channels: Channel[], mode: SortMode): Channel[] {
 
 function sortShows(shows: Show[], mode: SortMode): Show[] {
   if (mode === 'name') return [...shows].sort((a, b) => a.name.localeCompare(b.name))
-  // For "added" on shows, fall back to the earliest episode's sort order.
-  return [...shows].sort((a, b) => {
-    const ao = Math.min(...a.episodes.map((e) => e.channel.sortOrder))
-    const bo = Math.min(...b.episodes.map((e) => e.channel.sortOrder))
-    return ao - bo
-  })
+  // For "added" on shows, use the show row itself (provider series) or
+  // fall back to the earliest episode's sort order.
+  const order = (s: Show) =>
+    s.container?.sortOrder ?? Math.min(...s.episodes.map((e) => e.channel.sortOrder))
+  return [...shows].sort((a, b) => order(a) - order(b))
+}
+
+/**
+ * Episodes of a provider-structured series, fetched when the show is
+ * opened. Stale responses (the user opened another show meanwhile) are
+ * dropped.
+ */
+function useRemoteEpisodes(container: Channel | null) {
+  const [state, setState] = useState<{
+    forId: number | null
+    episodes: Episode[]
+    loading: boolean
+    error: string | null
+  }>({ forId: null, episodes: [], loading: false, error: null })
+  const id = container?.id ?? null
+
+  useEffect(() => {
+    if (id === null) return
+    let cancelled = false
+    setState({ forId: id, episodes: [], loading: true, error: null })
+    ipc
+      .listEpisodes(id)
+      .then((rows) => {
+        if (!cancelled) setState({ forId: id, episodes: rows.map(toEpisode), loading: false, error: null })
+      })
+      .catch((e) => {
+        if (!cancelled)
+          setState({ forId: id, episodes: [], loading: false, error: String(e).replace(/^Error:\s*/, '') })
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id])
+
+  return state.forId === id ? state : { forId: id, episodes: [], loading: id !== null, error: null }
 }
 
 function SortMenu({ value, onChange }: { value: SortMode; onChange(m: SortMode): void }) {
@@ -351,11 +393,13 @@ function ShowRow({ show, active, onClick }: { show: Show; active: boolean; onCli
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{show.name}</div>
         <div className="truncate text-xs text-zinc-500">
-          {epCount === 1
-            ? '1 episode'
-            : seasons.size > 1
-              ? `${seasons.size} seasons · ${epCount} episodes`
-              : `${epCount} episodes`}
+          {show.container
+            ? show.group ?? 'Series'
+            : epCount === 1
+              ? '1 episode'
+              : seasons.size > 1
+                ? `${seasons.size} seasons · ${epCount} episodes`
+                : `${epCount} episodes`}
         </div>
       </div>
       <span className="shrink-0 text-zinc-600 group-hover:text-zinc-400">›</span>

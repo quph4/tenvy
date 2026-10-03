@@ -16,10 +16,16 @@ interface PlaylistState {
   channels: Channel[]
   loadingChannels: boolean
 
+  /** Series drilldown: the `Show.key` whose episodes are on screen. */
+  openShowKey: string | null
+
   hydrate(): Promise<void>
   setActiveSource(id: number | null): Promise<void>
   setActiveKind(kind: ChannelKind): Promise<void>
   setActiveGroup(group: string | null): Promise<void>
+  setOpenShowKey(key: string | null): void
+  /** Navigate to a provider-structured series (e.g. from search). */
+  openSeries(show: Channel): Promise<void>
   refreshChannels(): Promise<void>
 }
 
@@ -34,10 +40,14 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   activeGroup: null,
   channels: [],
   loadingChannels: false,
+  openShowKey: null,
 
   async hydrate() {
     const sources = await ipc.listSources()
-    const activeSourceId = sources[0]?.id ?? null
+    // Keep the current source if it still exists (e.g. after adding a
+    // second playlist); otherwise fall back to the first one.
+    const current = get().activeSourceId
+    const activeSourceId = sources.some((s) => s.id === current) ? current : sources[0]?.id ?? null
     set({ sources, activeSourceId })
     const { activeKind } = get()
     const groups = await ipc.listGroups(activeSourceId, activeKind)
@@ -46,7 +56,7 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   },
 
   async setActiveSource(id) {
-    set({ activeSourceId: id, activeGroup: null })
+    set({ activeSourceId: id, activeGroup: null, openShowKey: null })
     const { activeKind } = get()
     const groups = await ipc.listGroups(id, activeKind)
     set({ groups })
@@ -55,7 +65,7 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
 
   async setActiveKind(kind) {
     if (get().activeKind === kind) return
-    set({ activeKind: kind, activeGroup: null })
+    set({ activeKind: kind, activeGroup: null, openShowKey: null })
     const { activeSourceId } = get()
     const groups = await ipc.listGroups(activeSourceId, kind)
     set({ groups })
@@ -63,8 +73,18 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   },
 
   async setActiveGroup(group) {
-    set({ activeGroup: group })
+    set({ activeGroup: group, openShowKey: null })
     await get().refreshChannels()
+  },
+
+  setOpenShowKey(key) {
+    set({ openShowKey: key })
+  },
+
+  async openSeries(show) {
+    if (get().activeKind !== 'series') await get().setActiveKind('series')
+    if (get().activeGroup !== null) await get().setActiveGroup(null)
+    set({ openShowKey: `c:${show.id}` })
   },
 
   async refreshChannels() {
@@ -77,9 +97,10 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
       } else if (activeGroup === HISTORY_GROUP) {
         // History needs both the joined list (for the row render) and a
         // fresh progress map (the other views read from it for badges).
-        // Refresh in parallel so opening History doesn't visibly lag.
-        await useHistory.getState().loadEntries()
-        await useHistory.getState().loadProgress()
+        await Promise.all([
+          useHistory.getState().loadEntries(),
+          useHistory.getState().loadProgress(),
+        ])
         channels = useHistory.getState().entries.map((e) => e.channel)
       } else {
         channels = await ipc.listChannels({

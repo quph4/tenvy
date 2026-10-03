@@ -38,10 +38,29 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
             group: entry.group,
             stream_url,
             kind,
+            ..Default::default()
         });
     }
 
     Ok(out)
+}
+
+/// The guide URL a playlist advertises in its header, e.g.
+/// `#EXTM3U url-tvg="http://…/epg.xml.gz"`. `x-tvg-url` is the common
+/// alias; either may hold a comma-separated list, of which we take the
+/// first http(s) entry.
+pub fn header_guide_url(input: &str) -> Option<String> {
+    let first = input
+        .lines()
+        .map(|l| l.trim_start_matches('\u{FEFF}').trim())
+        .find(|l| !l.is_empty())?;
+    let attrs = first.strip_prefix("#EXTM3U")?;
+    iter_attrs(attrs)
+        .filter(|(k, _)| matches!(*k, "url-tvg" | "x-tvg-url"))
+        .flat_map(|(_, v)| v.split(','))
+        .map(str::trim)
+        .find(|u| u.starts_with("http://") || u.starts_with("https://"))
+        .map(str::to_string)
 }
 
 #[derive(Default)]
@@ -221,6 +240,13 @@ mod tests {
         assert_eq!(out[0].kind, "live");
         assert_eq!(out[1].name, "Plain Channel");
         assert!(out[1].group.is_none());
+    }
+
+    #[test]
+    fn reads_guide_url_from_header() {
+        let src = "\u{FEFF}#EXTM3U x-tvg-url=\"ftp://no, https://epg.example/a.xml.gz\"\n#EXTINF:-1,A\nhttp://x\n";
+        assert_eq!(header_guide_url(src).as_deref(), Some("https://epg.example/a.xml.gz"));
+        assert_eq!(header_guide_url("#EXTM3U\n#EXTINF:-1,A\nhttp://x\n"), None);
     }
 
     #[test]

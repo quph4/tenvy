@@ -32,13 +32,29 @@ fn migrate(conn: &Connection) -> Result<()> {
             [],
         )?;
     }
-    // Always create the index — safe on both fresh and migrated DBs.
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_channels_kind ON channels(source_id, kind, group_name)",
-        [],
+    // Xtream series support: a show is a `container` row whose episodes
+    // are child rows (`parent_id`) fetched on demand.
+    for (col, ddl) in [
+        ("container", "ALTER TABLE channels ADD COLUMN container INTEGER NOT NULL DEFAULT 0"),
+        ("parent_id", "ALTER TABLE channels ADD COLUMN parent_id INTEGER REFERENCES channels(id) ON DELETE CASCADE"),
+        ("season", "ALTER TABLE channels ADD COLUMN season INTEGER"),
+        ("episode", "ALTER TABLE channels ADD COLUMN episode INTEGER"),
+    ] {
+        if !column_exists(conn, "channels", col)? {
+            conn.execute(ddl, [])?;
+        }
+    }
+    // Always create the indexes — safe on both fresh and migrated DBs.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_channels_kind ON channels(source_id, kind, group_name);
+         CREATE INDEX IF NOT EXISTS idx_channels_parent ON channels(parent_id);",
     )?;
     Ok(())
 }
+
+/// Column list for `row_to_channel`, against a table aliased `c`.
+const CHANNEL_COLS: &str = "c.id, c.source_id, c.tvg_id, c.name, c.logo, c.group_name, c.stream_url, \
+     c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode";
 
 fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
@@ -70,6 +86,10 @@ fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<Channel> {
         stream_url: row.get("stream_url")?,
         sort_order: row.get("sort_order")?,
         kind: row.get("kind")?,
+        container: row.get::<_, i64>("container")? != 0,
+        parent_id: row.get("parent_id")?,
+        season: row.get("season")?,
+        episode: row.get("episode")?,
     })
 }
 
@@ -152,22 +172,69 @@ pub fn touch_source(db: &Db, id: i64) -> Result<()> {
 
 // ---------- channels ----------
 
-/// Sync a source's channel rows with a freshly ingested list.
+/// Sync a source's top-level channel rows with a freshly ingested list.
 ///
 /// Rows are matched on `channel_key` and updated in place so their ids —
 /// and therefore favorites and watch history, which hang off `channels.id`
 /// with ON DELETE CASCADE — survive a refresh. Only channels that are no
-/// longer in the playlist are deleted. Duplicate keys (the same stream
-/// listed under two groups) pair up with existing rows in id order.
+/// longer in the playlist are deleted. Episode rows (`parent_id` set) are
+/// left alone; they belong to their show and go when it goes.
 pub fn replace_channels(db: &Db, source_id: i64, channels: &[ChannelInsert]) -> Result<usize> {
     let mut conn = db.lock().unwrap();
     let tx = conn.transaction()?;
+    sync_rows(&tx, source_id, None, None, channels)?;
+    tx.commit()?;
+    Ok(channels.len())
+}
 
+/// Sync the episode rows under one series container (same id-preserving
+/// rules as `replace_channels`). Returns the stored episodes in order.
+pub fn replace_episodes(db: &Db, parent_id: i64, episodes: &[ChannelInsert]) -> Result<Vec<Channel>> {
+    {
+        let mut conn = db.lock().unwrap();
+        let tx = conn.transaction()?;
+        let (source_id, group): (i64, Option<String>) = tx.query_row(
+            "SELECT source_id, group_name FROM channels WHERE id = ?1",
+            [parent_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        sync_rows(&tx, source_id, Some(parent_id), group.as_deref(), episodes)?;
+        tx.commit()?;
+    }
+    list_episodes(db, parent_id)
+}
+
+pub fn list_episodes(db: &Db, parent_id: i64) -> Result<Vec<Channel>> {
+    let conn = db.lock().unwrap();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHANNEL_COLS} FROM channels c WHERE c.parent_id = ?1 ORDER BY c.sort_order"
+    ))?;
+    let rows = stmt
+        .query_map([parent_id], row_to_channel)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// The shared update-in-place / insert / delete-vanished algorithm, scoped
+/// to one source and one parent (None = top-level rows). Duplicate keys
+/// (the same stream listed under two groups) pair up with existing rows in
+/// id order. `group` overrides each item's group (episodes inherit the
+/// show's).
+fn sync_rows(
+    tx: &rusqlite::Transaction,
+    source_id: i64,
+    parent_id: Option<i64>,
+    group: Option<&str>,
+    items: &[ChannelInsert],
+) -> Result<()> {
     let mut existing: HashMap<String, VecDeque<i64>> = HashMap::new();
     {
-        let mut stmt =
-            tx.prepare("SELECT id, stream_url FROM channels WHERE source_id = ?1 ORDER BY id")?;
-        let rows = stmt.query_map([source_id], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        let mut stmt = tx.prepare(
+            "SELECT id, stream_url FROM channels WHERE source_id = ?1 AND parent_id IS ?2 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(params![source_id, parent_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
         for row in rows {
             let (id, url) = row?;
             existing.entry(channel_key(&url)).or_default().push_back(id);
@@ -177,42 +244,42 @@ pub fn replace_channels(db: &Db, source_id: i64, channels: &[ChannelInsert]) -> 
     {
         let mut update = tx.prepare(
             "UPDATE channels
-                SET tvg_id = ?2, name = ?3, logo = ?4, group_name = ?5,
-                    stream_url = ?6, sort_order = ?7, kind = ?8
+                SET tvg_id = ?2, name = ?3, logo = ?4, group_name = ?5, stream_url = ?6,
+                    sort_order = ?7, kind = ?8, container = ?9, season = ?10, episode = ?11
               WHERE id = ?1",
         )?;
         let mut insert = tx.prepare(
-            "INSERT INTO channels(source_id, tvg_id, name, logo, group_name, stream_url, sort_order, kind)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO channels(source_id, parent_id, tvg_id, name, logo, group_name, stream_url,
+                                  sort_order, kind, container, season, episode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         )?;
-        for (i, c) in channels.iter().enumerate() {
+        for (i, c) in items.iter().enumerate() {
+            let group = group.or(c.group.as_deref());
             let reuse = existing
                 .get_mut(&channel_key(&c.stream_url))
                 .and_then(|ids| ids.pop_front());
             match reuse {
                 Some(id) => {
                     update.execute(params![
-                        id, c.tvg_id, c.name, c.logo, c.group, c.stream_url, i as i64, c.kind,
+                        id, c.tvg_id, c.name, c.logo, group, c.stream_url, i as i64, c.kind,
+                        c.container, c.season, c.episode,
                     ])?;
                 }
                 None => {
                     insert.execute(params![
-                        source_id, c.tvg_id, c.name, c.logo, c.group, c.stream_url, i as i64, c.kind,
+                        source_id, parent_id, c.tvg_id, c.name, c.logo, group, c.stream_url,
+                        i as i64, c.kind, c.container, c.season, c.episode,
                     ])?;
                 }
             }
         }
     }
 
-    {
-        let mut delete = tx.prepare("DELETE FROM channels WHERE id = ?1")?;
-        for id in existing.into_values().flatten() {
-            delete.execute([id])?;
-        }
+    let mut delete = tx.prepare("DELETE FROM channels WHERE id = ?1")?;
+    for id in existing.into_values().flatten() {
+        delete.execute([id])?;
     }
-
-    tx.commit()?;
-    Ok(channels.len())
+    Ok(())
 }
 
 /// Identity of a channel across refreshes. Xtream URLs embed the account's
@@ -226,6 +293,7 @@ fn channel_key(stream_url: &str) -> String {
     }
 }
 
+#[derive(Debug, Default)]
 pub struct ChannelInsert {
     pub tvg_id: Option<String>,
     pub name: String,
@@ -233,6 +301,10 @@ pub struct ChannelInsert {
     pub group: Option<String>,
     pub stream_url: String,
     pub kind: String, // "live" | "movie" | "series"
+    /// A series whose episodes are fetched on demand (Xtream).
+    pub container: bool,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
 }
 
 pub fn list_groups(
@@ -246,10 +318,11 @@ pub fn list_groups(
     // (an M3U's `group-title=` sequence, or an Xtream `get_categories`
     // response). This is the same "relevance" order TiviMate uses — it's
     // curated by the provider, not alphabetical. Callers that want A–Z can
-    // re-sort on the frontend.
+    // re-sort on the frontend. NULL and '' both mean "Uncategorized", so
+    // group on the coalesced value to get one row for them.
     let mut sql = String::from(
         "SELECT COALESCE(group_name,'') AS g, COUNT(*) AS n, MIN(sort_order) AS ord \
-         FROM channels WHERE 1=1",
+         FROM channels WHERE parent_id IS NULL",
     );
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(sid) = source_id {
@@ -260,7 +333,7 @@ pub fn list_groups(
         sql.push_str(" AND kind = ?");
         args.push(Box::new(k.to_string()));
     }
-    sql.push_str(" GROUP BY group_name ORDER BY ord");
+    sql.push_str(" GROUP BY g ORDER BY ord");
 
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|p| p.as_ref()).collect();
@@ -284,28 +357,25 @@ pub fn list_channels(
     kind: Option<&str>,
 ) -> Result<Vec<Channel>> {
     let conn = db.lock().unwrap();
-    let mut sql = String::from(
-        "SELECT id, source_id, tvg_id, name, logo, group_name, stream_url, sort_order, kind
-           FROM channels WHERE 1=1",
-    );
+    let mut sql = format!("SELECT {CHANNEL_COLS} FROM channels c WHERE c.parent_id IS NULL");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(sid) = source_id {
-        sql.push_str(" AND source_id = ?");
+        sql.push_str(" AND c.source_id = ?");
         args.push(Box::new(sid));
     }
     if let Some(k) = kind {
-        sql.push_str(" AND kind = ?");
+        sql.push_str(" AND c.kind = ?");
         args.push(Box::new(k.to_string()));
     }
     match group {
-        Some("Uncategorized") => sql.push_str(" AND (group_name IS NULL OR group_name = '')"),
+        Some("Uncategorized") => sql.push_str(" AND (c.group_name IS NULL OR c.group_name = '')"),
         Some(g) => {
-            sql.push_str(" AND group_name = ?");
+            sql.push_str(" AND c.group_name = ?");
             args.push(Box::new(g.to_string()));
         }
         None => {}
     }
-    sql.push_str(" ORDER BY sort_order LIMIT 20000");
+    sql.push_str(" ORDER BY c.sort_order LIMIT 50000");
 
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|p| p.as_ref()).collect();
@@ -315,35 +385,45 @@ pub fn list_channels(
     Ok(rows)
 }
 
-/// Look up a single channel by primary key. Used by the track probe path
-/// where we need a channel's `stream_url` and `kind` after the user clicks
-/// something specific.
 pub fn get_channel(db: &Db, id: i64) -> Result<Option<Channel>> {
     let conn = db.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT id, source_id, tvg_id, name, logo, group_name, stream_url, sort_order, kind
-           FROM channels WHERE id = ?1",
-    )?;
-    let mut rows = stmt.query_map([id], row_to_channel)?;
-    match rows.next() {
-        Some(r) => Ok(Some(r?)),
-        None => Ok(None),
-    }
+    let row = conn
+        .query_row(
+            &format!("SELECT {CHANNEL_COLS} FROM channels c WHERE c.id = ?1"),
+            [id],
+            row_to_channel,
+        )
+        .optional()?;
+    Ok(row)
 }
 
-pub fn search_channels(db: &Db, q: &str, kind: Option<&str>) -> Result<Vec<Channel>> {
+/// Case-insensitive substring search over every top-level channel, movie
+/// and show — across all groups, not just the one on screen.
+pub fn search_channels(
+    db: &Db,
+    q: &str,
+    source_id: Option<i64>,
+    kind: Option<&str>,
+) -> Result<Vec<Channel>> {
     let conn = db.lock().unwrap();
-    let like = format!("%{}%", q);
-    let mut sql = String::from(
-        "SELECT id, source_id, tvg_id, name, logo, group_name, stream_url, sort_order, kind
-           FROM channels WHERE name LIKE ?1 COLLATE NOCASE",
+    // Escape LIKE wildcards so a search for "100%" means the literal text.
+    let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let mut sql = format!(
+        "SELECT {CHANNEL_COLS} FROM channels c
+          WHERE c.parent_id IS NULL AND c.name LIKE ? ESCAPE '\\' COLLATE NOCASE"
     );
-    let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(like)];
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("%{}%", escaped))];
+    if let Some(sid) = source_id {
+        sql.push_str(" AND c.source_id = ?");
+        args.push(Box::new(sid));
+    }
     if let Some(k) = kind {
-        sql.push_str(" AND kind = ?");
+        sql.push_str(" AND c.kind = ?");
         args.push(Box::new(k.to_string()));
     }
-    sql.push_str(" ORDER BY sort_order LIMIT 500");
+    // Prefix matches first, then provider order.
+    sql.push_str(" ORDER BY (c.name LIKE ? ESCAPE '\\' COLLATE NOCASE) DESC, c.sort_order LIMIT 200");
+    args.push(Box::new(format!("{}%", escaped)));
 
     let mut stmt = conn.prepare(&sql)?;
     let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|p| p.as_ref()).collect();
@@ -357,11 +437,11 @@ pub fn search_channels(db: &Db, q: &str, kind: Option<&str>) -> Result<Vec<Chann
 
 pub fn list_favorites(db: &Db) -> Result<Vec<Channel>> {
     let conn = db.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT c.id, c.source_id, c.tvg_id, c.name, c.logo, c.group_name, c.stream_url, c.sort_order, c.kind
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHANNEL_COLS}
            FROM favorites f JOIN channels c ON c.id = f.channel_id
-           ORDER BY f.added_at DESC",
-    )?;
+           ORDER BY f.added_at DESC"
+    ))?;
     let rows = stmt
         .query_map([], row_to_channel)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -421,12 +501,11 @@ pub fn upsert_watch_progress(
 
 pub fn list_watch_history(db: &Db) -> Result<Vec<HistoryEntry>> {
     let conn = db.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT c.id, c.source_id, c.tvg_id, c.name, c.logo, c.group_name, c.stream_url, c.sort_order, c.kind,
-                h.time_pos, h.duration, h.watched_at, h.finished
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHANNEL_COLS}, h.time_pos, h.duration, h.watched_at, h.finished
            FROM watch_history h JOIN channels c ON c.id = h.channel_id
-           ORDER BY h.watched_at DESC",
-    )?;
+           ORDER BY h.watched_at DESC"
+    ))?;
     let rows = stmt
         .query_map([], |r| {
             Ok(HistoryEntry {
@@ -606,7 +685,45 @@ mod tests {
             group: Some("G".into()),
             stream_url: url.into(),
             kind: "live".into(),
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn episodes_live_under_their_show() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::Xtream, "s", "http://h", None, None).unwrap();
+        let show = ChannelInsert {
+            kind: "series".into(),
+            container: true,
+            ..ch("Show", "http://h/series/u/p/9")
+        };
+        replace_channels(&db, sid, &[show]).unwrap();
+        let show_id = id_of(&db, "Show");
+
+        let ep = |n: i64| ChannelInsert {
+            kind: "series".into(),
+            season: Some(1),
+            episode: Some(n),
+            ..ch(&format!("E{n}"), &format!("http://h/series/u/p/{}.mkv", 100 + n))
+        };
+        let eps = replace_episodes(&db, show_id, &[ep(1), ep(2)]).unwrap();
+        assert_eq!(eps.len(), 2);
+        assert_eq!(eps[0].parent_id, Some(show_id));
+        assert_eq!(eps[1].episode, Some(2));
+        upsert_watch_progress(&db, eps[0].id, 50.0, 100.0, false).unwrap();
+
+        // Episodes don't show up as top-level rows, and a playlist refresh
+        // that still contains the show leaves them (and history) intact.
+        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 1);
+        let show_again = ChannelInsert { kind: "series".into(), container: true, ..ch("Show", "http://h/series/u/p/9") };
+        replace_channels(&db, sid, &[show_again]).unwrap();
+        assert_eq!(list_episodes(&db, show_id).unwrap().len(), 2);
+        assert!(get_watch_entry(&db, eps[0].id).unwrap().is_some());
+
+        // The show disappearing takes its episodes with it.
+        replace_channels(&db, sid, &[]).unwrap();
+        assert!(list_episodes(&db, show_id).unwrap().is_empty());
     }
 
     fn id_of(db: &Db, name: &str) -> i64 {

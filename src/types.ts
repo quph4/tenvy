@@ -23,6 +23,12 @@ export interface Channel {
   streamUrl: string
   sortOrder: number
   kind: ChannelKind
+  /** A series show whose episodes load on demand via `ipc.listEpisodes`. */
+  container: boolean
+  /** Set on episodes: the show (container) they belong to. */
+  parentId: number | null
+  season: number | null
+  episode: number | null
 }
 
 export interface Programme {
@@ -38,18 +44,6 @@ export interface Group {
   count: number
 }
 
-/** One audio or subtitle track reported by the provider's ffprobe. */
-export interface ProbedTrack {
-  /** Stream index inside the container — stable id that matches what
-   *  mpv/VLC show after pressing X. */
-  index: number
-  codec: string | null
-  language: string | null
-  title: string | null
-  /** "Stereo" / "5.1" / "Mono" — audio only. */
-  channelLayout: string | null
-  isDefault: boolean
-}
 
 /** One live track from mpv's `track-list`. Shape mirrors
  *  src-tauri/src/commands/mpv_state.rs TrackInfoDto (camelCase via serde). */
@@ -101,13 +95,4 @@ export interface HistoryProgress {
   duration: number
   watchedAt: number
   finished: boolean
-}
-
-export interface ProbedTracks {
-  audio: ProbedTrack[]
-  subtitle: ProbedTrack[]
-  /** Where the probe data came from. "container" = we demuxed the file
-   *  ourselves (authoritative, multi-track); "xtream" = panel API (usually
-   *  just the default track); "none" = nothing worked. */
-  provider: 'container' | 'xtream' | 'none'
 }

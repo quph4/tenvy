@@ -1,86 +1,62 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use serde_json::Value;
+
 use crate::db::ChannelInsert;
-use crate::error::Result;
-use crate::models::Programme;
 use crate::err;
+use crate::error::Result;
 
 /// Minimal Xtream Codes client.
 /// Endpoint: `{host}/player_api.php?username=…&password=…&action=…`.
-/// Output format: `{host}/live/{user}/{pass}/{stream_id}.{ext}`.
+/// Stream URLs: `{host}/{live|movie|series}/{user}/{pass}/{id}.{ext}`.
+///
+/// Panels disagree wildly on JSON types (ids arrive as numbers or strings,
+/// lists as arrays or id-keyed maps), so responses are read as loose
+/// `serde_json::Value`s through the tolerant helpers at the bottom rather
+/// than strict structs that would reject a whole catalogue over one field.
 pub struct Xtream {
-    pub host: String,
-    pub username: String,
-    pub password: String,
+    host: String,
+    username: String,
+    password: String,
     client: reqwest::Client,
 }
 
-#[derive(Debug, Deserialize)]
-struct Category {
-    category_id: String,
-    category_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct LiveStream {
-    #[serde(default)]
-    stream_id: i64,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    stream_icon: Option<String>,
-    #[serde(default)]
-    category_id: Option<String>,
-    #[serde(default)]
-    epg_channel_id: Option<String>,
-    #[serde(default)]
-    container_extension: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ShortEpgWrap {
-    #[serde(default)]
-    epg_listings: Vec<ShortEpgItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ShortEpgItem {
-    title: Option<String>,
-    description: Option<String>,
-    #[serde(default)]
-    start_timestamp: Option<String>,
-    #[serde(default)]
-    stop_timestamp: Option<String>,
-    #[serde(default)]
-    start: Option<String>,
-    #[serde(default)]
-    end: Option<String>,
+/// What a full catalogue fetch produced, per content kind.
+pub struct Catalogue {
+    pub channels: Vec<ChannelInsert>,
+    pub live: usize,
+    pub movies: usize,
+    pub series: usize,
 }
 
 impl Xtream {
-    pub fn new(host: &str, username: &str, password: &str) -> Result<Self> {
-        let host = host.trim_end_matches('/').to_string();
-        // Validate early
-        reqwest::Url::parse(&host).map_err(|_| err!("Invalid Xtream host URL"))?;
+    pub fn new(host: &str, username: &str, password: &str, client: reqwest::Client) -> Result<Self> {
+        let host = normalize_host(host)?;
         Ok(Self {
             host,
             username: username.to_string(),
             password: password.to_string(),
-            client: reqwest::Client::builder()
-                .user_agent("Lumen/0.1 (+https://lumen.local)")
-                .timeout(std::time::Duration::from_secs(30))
-                .build()?,
+            client,
         })
     }
 
-    fn api_url(&self, action: &str, extra: &[(&str, &str)]) -> Result<reqwest::Url> {
+    pub fn xmltv_url(&self) -> String {
+        let mut url = reqwest::Url::parse(&format!("{}/xmltv.php", self.host)).expect("validated host");
+        url.query_pairs_mut()
+            .append_pair("username", &self.username)
+            .append_pair("password", &self.password);
+        url.to_string()
+    }
+
+    fn api_url(&self, action: Option<&str>, extra: &[(&str, &str)]) -> Result<reqwest::Url> {
         let mut url = reqwest::Url::parse(&format!("{}/player_api.php", self.host))?;
         {
             let mut q = url.query_pairs_mut();
             q.append_pair("username", &self.username);
             q.append_pair("password", &self.password);
-            q.append_pair("action", action);
+            if let Some(action) = action {
+                q.append_pair("action", action);
+            }
             for (k, v) in extra {
                 q.append_pair(k, v);
             }
@@ -88,131 +64,215 @@ impl Xtream {
         Ok(url)
     }
 
-    pub async fn fetch_channels(&self) -> Result<Vec<ChannelInsert>> {
-        // Categories → id → name
-        let cats: Vec<Category> = self
+    async fn get_json(&self, action: Option<&str>, extra: &[(&str, &str)]) -> Result<Value> {
+        let resp = self
             .client
-            .get(self.api_url("get_live_categories", &[])?)
+            .get(self.api_url(action, extra)?)
             .send()
             .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        // Trim category names — Xtream providers often pad them with
-        // spaces *and* zero-width characters (intentional sort tricks, or
-        // careless data entry), which then shows up as weird indentation
-        // in the sidebar. `m3u::clean` covers both.
-        let cat_map: HashMap<String, String> = cats
-            .into_iter()
-            .map(|c| (c.category_id, crate::sources::m3u::clean(&c.category_name)))
-            .collect();
+            .error_for_status()?;
+        // Some panels send JSON with a text/html content type, or a BOM.
+        let text = resp.text().await?;
+        let text = text.trim_start_matches('\u{FEFF}').trim();
+        if text.is_empty() {
+            return Ok(Value::Null);
+        }
+        serde_json::from_str(text).map_err(|_| {
+            err!("The provider returned something that isn't Xtream JSON (action {:?})", action)
+        })
+    }
 
-        let streams: Vec<LiveStream> = self
-            .client
-            .get(self.api_url("get_live_streams", &[])?)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+    /// Check credentials before downloading a catalogue, so a typo shows up
+    /// as "wrong password" rather than an empty channel list.
+    pub async fn authenticate(&self) -> Result<()> {
+        let v = self.get_json(None, &[]).await?;
+        let info = v.get("user_info").ok_or_else(|| {
+            err!("This doesn't look like an Xtream Codes server. Check the host URL.")
+        })?;
+        if int(info, "auth") != Some(1) {
+            return Err(err!("The provider rejected the username or password."));
+        }
+        if let Some(status) = string(info, "status") {
+            if !status.eq_ignore_ascii_case("active") {
+                return Err(err!("The provider reports this account as \"{}\".", status));
+            }
+        }
+        Ok(())
+    }
 
-        Ok(streams
-            .into_iter()
-            .map(|s| {
-                let ext = s.container_extension.unwrap_or_else(|| "m3u8".into());
-                let stream_url = format!(
-                    "{}/live/{}/{}/{}.{}",
-                    self.host, self.username, self.password, s.stream_id, ext
-                );
-                ChannelInsert {
-                    tvg_id: trim_opt(s.epg_channel_id),
-                    name: crate::sources::m3u::clean(&s.name),
-                    logo: trim_opt(s.stream_icon),
-                    group: s.category_id.and_then(|id| cat_map.get(&id).cloned()),
-                    stream_url,
-                    kind: "live".into(),
-                }
+    /// Fetch live channels, movies and series. Live failing is fatal; VOD
+    /// and series are optional extras that many accounts don't include, so
+    /// those degrade to empty with a warning.
+    pub async fn fetch_catalogue(&self) -> Result<Catalogue> {
+        self.authenticate().await?;
+
+        let mut channels = Vec::new();
+
+        let cats = self.categories("get_live_categories").await?;
+        for s in array(&self.get_json(Some("get_live_streams"), &[]).await?) {
+            let Some(id) = int(s, "stream_id") else { continue };
+            let ext = string(s, "container_extension").unwrap_or_else(|| "m3u8".into());
+            channels.push(ChannelInsert {
+                tvg_id: string(s, "epg_channel_id"),
+                name: string(s, "name").unwrap_or_else(|| format!("Channel {}", id)),
+                logo: string(s, "stream_icon"),
+                group: string(s, "category_id").and_then(|c| cats.get(&c).cloned()),
+                stream_url: self.stream_url("live", id, &ext),
+                kind: "live".into(),
+                ..Default::default()
+            });
+        }
+        let live = channels.len();
+
+        let movies_before = channels.len();
+        match self.fetch_movies().await {
+            Ok(mut m) => channels.append(&mut m),
+            Err(e) => tracing::warn!(target: "lumen_lib", "xtream movies unavailable: {}", e),
+        }
+        let movies = channels.len() - movies_before;
+
+        let series_before = channels.len();
+        match self.fetch_series().await {
+            Ok(mut s) => channels.append(&mut s),
+            Err(e) => tracing::warn!(target: "lumen_lib", "xtream series unavailable: {}", e),
+        }
+        let series = channels.len() - series_before;
+
+        Ok(Catalogue { channels, live, movies, series })
+    }
+
+    async fn fetch_movies(&self) -> Result<Vec<ChannelInsert>> {
+        let cats = self.categories("get_vod_categories").await?;
+        Ok(array(&self.get_json(Some("get_vod_streams"), &[]).await?)
+            .iter()
+            .filter_map(|s| {
+                let id = int(s, "stream_id")?;
+                let ext = string(s, "container_extension").unwrap_or_else(|| "mp4".into());
+                Some(ChannelInsert {
+                    name: string(s, "name").unwrap_or_else(|| format!("Movie {}", id)),
+                    logo: string(s, "stream_icon").or_else(|| string(s, "cover")),
+                    group: string(s, "category_id").and_then(|c| cats.get(&c).cloned()),
+                    stream_url: self.stream_url("movie", id, &ext),
+                    kind: "movie".into(),
+                    ..Default::default()
+                })
             })
             .collect())
     }
 
-    /// Fetch short EPG for a single stream (handful of upcoming programmes).
-    pub async fn fetch_short_epg(&self, stream_id: i64, tvg_id: &str) -> Result<Vec<Programme>> {
-        let wrap: ShortEpgWrap = self
-            .client
-            .get(self.api_url(
-                "get_short_epg",
-                &[("stream_id", &stream_id.to_string()), ("limit", "8")],
-            )?)
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
+    /// Series are stored as *containers*: one row per show, with episodes
+    /// fetched on demand by `fetch_episodes` when the user opens it. Pulling
+    /// every show's episode list up front would mean thousands of requests.
+    async fn fetch_series(&self) -> Result<Vec<ChannelInsert>> {
+        let cats = self.categories("get_series_categories").await?;
+        Ok(array(&self.get_json(Some("get_series"), &[]).await?)
+            .iter()
+            .filter_map(|s| {
+                let id = int(s, "series_id")?;
+                Some(ChannelInsert {
+                    name: string(s, "name").unwrap_or_else(|| format!("Series {}", id)),
+                    logo: string(s, "cover"),
+                    group: string(s, "category_id").and_then(|c| cats.get(&c).cloned()),
+                    // Not playable — identifies the show (see db::channel_key).
+                    stream_url: format!("{}/series/{}/{}/{}", self.host, self.username, self.password, id),
+                    kind: "series".into(),
+                    container: true,
+                    ..Default::default()
+                })
+            })
+            .collect())
+    }
 
-        let mut out = Vec::with_capacity(wrap.epg_listings.len());
-        for item in wrap.epg_listings {
-            let start = parse_ts(item.start_timestamp.as_deref(), item.start.as_deref());
-            let stop = parse_ts(item.stop_timestamp.as_deref(), item.end.as_deref());
-            if let (Some(start), Some(stop)) = (start, stop) {
-                out.push(Programme {
-                    channel_tvg_id: tvg_id.to_string(),
-                    start,
-                    stop,
-                    title: item.title.unwrap_or_default(),
-                    description: item.description.filter(|s| !s.is_empty()),
-                });
-            }
-        }
+    /// Episodes of one show, ordered by season then episode number.
+    pub async fn fetch_episodes(&self, series_id: i64) -> Result<Vec<ChannelInsert>> {
+        let v = self
+            .get_json(Some("get_series_info"), &[("series_id", &series_id.to_string())])
+            .await?;
+        let cover = v.get("info").and_then(|i| string(i, "cover"));
+
+        // `episodes` is usually `{ "1": [..], "2": [..] }` keyed by season,
+        // but some panels send a bare array of season arrays.
+        let seasons: Vec<&Value> = match v.get("episodes") {
+            Some(Value::Object(map)) => map.values().collect(),
+            Some(Value::Array(arr)) => arr.iter().collect(),
+            _ => Vec::new(),
+        };
+
+        let mut out: Vec<ChannelInsert> = seasons
+            .into_iter()
+            .flat_map(array)
+            .filter_map(|e| {
+                let id = int(e, "id")?;
+                let ext = string(e, "container_extension").unwrap_or_else(|| "mp4".into());
+                let season = int(e, "season");
+                let episode = int(e, "episode_num");
+                let info = e.get("info");
+                Some(ChannelInsert {
+                    name: string(e, "title").unwrap_or_else(|| format!("Episode {}", episode.unwrap_or(0))),
+                    logo: info.and_then(|i| string(i, "movie_image")).or_else(|| cover.clone()),
+                    stream_url: self.stream_url("series", id, &ext),
+                    kind: "series".into(),
+                    season,
+                    episode,
+                    ..Default::default()
+                })
+            })
+            .collect();
+        out.sort_by_key(|e| (e.season.unwrap_or(0), e.episode.unwrap_or(0)));
         Ok(out)
+    }
+
+    async fn categories(&self, action: &str) -> Result<HashMap<String, String>> {
+        // Names are cleaned with `m3u::clean`: providers pad them with
+        // spaces and zero-width characters as sort hacks, which shows up
+        // as odd indentation in the sidebar.
+        Ok(array(&self.get_json(Some(action), &[]).await?)
+            .iter()
+            .filter_map(|c| {
+                Some((string(c, "category_id")?, crate::sources::m3u::clean(&string(c, "category_name")?)))
+            })
+            .collect())
+    }
+
+    fn stream_url(&self, kind: &str, id: i64, ext: &str) -> String {
+        format!("{}/{}/{}/{}/{}.{}", self.host, kind, self.username, self.password, id, ext)
     }
 }
 
-/// Clean an optional string and drop it if it came out empty. Mirrors
-/// `m3u::non_empty` so both ingest paths agree on what "blank" means
-/// (including Unicode zero-width padding).
-fn trim_opt(s: Option<String>) -> Option<String> {
-    s.map(|v| crate::sources::m3u::clean(&v)).filter(|v| !v.is_empty())
+/// Accept what users paste: `host:port`, `http://host:port/`, or a full
+/// `…/player_api.php` / `…/get.php?…` URL. Returns `scheme://host[:port]`.
+fn normalize_host(input: &str) -> Result<String> {
+    let input = input.trim();
+    let with_scheme = if input.contains("://") {
+        input.to_string()
+    } else {
+        format!("http://{}", input)
+    };
+    let url = reqwest::Url::parse(&with_scheme).map_err(|_| err!("Invalid Xtream host URL"))?;
+    let host = url.host_str().ok_or_else(|| err!("Invalid Xtream host URL"))?;
+    Ok(match url.port() {
+        Some(p) => format!("{}://{}:{}", url.scheme(), host, p),
+        None => format!("{}://{}", url.scheme(), host),
+    })
 }
 
-// ------------- VOD probe -------------
-
-/// One audio or subtitle track as reported by the provider's ffprobe. `index`
-/// is the original stream index inside the container — useful as a stable id
-/// and it's what mpv/VLC show too, so our labels match what the user sees
-/// after pressing X.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbedTrack {
-    pub index: i64,
-    pub codec: Option<String>,
-    pub language: Option<String>,
-    pub title: Option<String>,
-    /// "Stereo" / "5.1" / "Mono" — only meaningful for audio tracks.
-    pub channel_layout: Option<String>,
-    pub is_default: bool,
+/// Recognise an Xtream "M3U plus" link (`…/get.php?username=…&password=…`)
+/// so a user who pastes one into the M3U tab gets the much richer Xtream
+/// import instead. Returns `(host, username, password)`.
+pub fn credentials_from_m3u_url(url: &str) -> Option<(String, String, String)> {
+    let parsed = reqwest::Url::parse(url).ok()?;
+    if !parsed.path().ends_with("/get.php") {
+        return None;
+    }
+    let q: HashMap<_, _> = parsed.query_pairs().collect();
+    let user = q.get("username")?.to_string();
+    let pass = q.get("password")?.to_string();
+    Some((normalize_host(url).ok()?, user, pass))
 }
 
-/// Result of probing a VOD URL via Xtream's `get_vod_info` endpoint. Shape
-/// is normalised so the frontend doesn't care which fields a given provider
-/// actually populated.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct ProbedTracks {
-    pub audio: Vec<ProbedTrack>,
-    pub subtitle: Vec<ProbedTrack>,
-    /// Provider that answered — currently always "xtream"; here so we can
-    /// extend this to other probe sources (e.g. bundled ffprobe) without
-    /// reshaping the API.
-    pub provider: String,
-}
-
-/// Xtream URL parts extracted from a stream URL.
-/// Pattern: `{scheme}://{host}[:port]/{movie|series|live}/{user}/{pass}/{id}.{ext}`.
+/// The identity of an Xtream stream, extracted from its URL.
+/// Pattern: `{scheme}://{host}[:port]/{movie|series|live}/{user}/{pass}/{id}[.{ext}]`.
 pub struct XtreamUrl {
-    pub host: String,
-    pub username: String,
-    pub password: String,
     /// "movie" | "series" | "live". Part of a channel's stable identity
     /// across refreshes (see `db::channel_key`).
     pub kind: String,
@@ -221,11 +281,11 @@ pub struct XtreamUrl {
 
 /// Parse an Xtream-formatted stream URL. Returns `None` for anything that
 /// doesn't match the expected shape — e.g. generic M3U streams from non-Xtream
-/// providers, which we can't probe.
+/// providers.
 pub fn parse_xtream_url(url: &str) -> Option<XtreamUrl> {
     let parsed = reqwest::Url::parse(url).ok()?;
     let segments: Vec<&str> = parsed.path_segments()?.collect();
-    // Expect exactly 4 segments: [kind, user, pass, "{id}.{ext}"]
+    // Expect at least [kind, user, pass, "{id}[.{ext}]"].
     if segments.len() < 4 {
         return None;
     }
@@ -234,229 +294,79 @@ pub fn parse_xtream_url(url: &str) -> Option<XtreamUrl> {
         _ => return None,
     };
     let id_with_ext = segments[3];
-    // Strip extension (".mkv" / ".mp4" / ".m3u8" etc.) if present. Extensionless
-    // URLs are also valid (e.g. some live Xtream streams).
     let id_str = id_with_ext
         .rsplit_once('.')
         .map(|(a, _)| a)
         .unwrap_or(id_with_ext);
     let stream_id: i64 = id_str.parse().ok()?;
 
-    // Reconstruct host (scheme + host + optional port) — drop path/query.
-    let scheme = parsed.scheme();
-    let host = parsed.host_str()?;
-    let host_full = if let Some(port) = parsed.port() {
-        format!("{}://{}:{}", scheme, host, port)
-    } else {
-        format!("{}://{}", scheme, host)
-    };
-
     Some(XtreamUrl {
-        host: host_full,
-        username: segments[1].to_string(),
-        password: segments[2].to_string(),
         kind,
         stream_id,
     })
 }
 
-impl Xtream {
-    /// Fetch ffprobe-style track metadata for a VOD. Works for Xtream movie
-    /// URLs; series episodes fall through to `get_vod_info` too since a lot
-    /// of panels alias them — when they don't, the endpoint returns empty
-    /// and we just surface no extras.
-    pub async fn probe_vod(&self, vod_id: i64) -> Result<ProbedTracks> {
-        let vod_id_str = vod_id.to_string();
-        let url = self.api_url("get_vod_info", &[("vod_id", &vod_id_str)])?;
-        let resp = self.client.get(url).send().await?.error_for_status()?;
-        let text = resp.text().await?;
-        // Some panels return `[]` when the id is unknown instead of a proper
-        // error. serde_json lets us detect that before trying the real shape.
-        if text.trim() == "[]" || text.trim().is_empty() {
-            return Ok(ProbedTracks {
-                provider: "xtream".into(),
-                ..Default::default()
-            });
-        }
-        let root: VodInfoRoot = serde_json::from_str(&text).map_err(|e| {
-            err!("get_vod_info parse failed: {} (body: {})", e, truncate(&text, 200))
-        })?;
-        Ok(normalize_vod_info(root))
-    }
+// ---------- tolerant JSON access ----------
+
+fn array(v: &Value) -> &[Value] {
+    v.as_array().map(Vec::as_slice).unwrap_or(&[])
 }
 
-fn truncate(s: &str, n: usize) -> &str {
-    if s.len() <= n { s } else { &s[..n] }
-}
-
-// ------------- get_vod_info JSON shapes -------------
-//
-// Xtream panels are famously inconsistent about this endpoint. The field we
-// care about is `info`, which carries an ffprobe dump. Different panels put
-// the streams in different places:
-//   - Some return `info.audio` (single) + `info.audio_additional` (extras)
-//   - Some return `info.streams` (full ffprobe array, mixed audio+video+subs)
-//   - Some return `info.subtitles` as a pre-split list
-//
-// We parse whichever arrived and fold them into a single normalised list.
-
-#[derive(Debug, Deserialize)]
-struct VodInfoRoot {
-    #[serde(default)]
-    info: Option<VodInfo>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct VodInfo {
-    #[serde(default)]
-    audio: Option<FfStream>,
-    #[serde(default)]
-    audio_additional: Vec<FfStream>,
-    #[serde(default)]
-    subtitles: Vec<FfStream>,
-    #[serde(default)]
-    streams: Vec<FfStream>,
-}
-
-/// Slice of an ffprobe stream entry — only the fields we actually use, all
-/// optional because every panel picks a different subset.
-#[derive(Debug, Deserialize, Default)]
-struct FfStream {
-    #[serde(default)]
-    index: Option<i64>,
-    #[serde(default)]
-    codec_type: Option<String>,
-    #[serde(default)]
-    codec_name: Option<String>,
-    #[serde(default)]
-    channel_layout: Option<String>,
-    #[serde(default)]
-    channels: Option<i64>,
-    #[serde(default)]
-    tags: Option<FfTags>,
-    #[serde(default)]
-    disposition: Option<FfDisposition>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct FfTags {
-    #[serde(default)]
-    language: Option<String>,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default, rename = "handler_name")]
-    handler_name: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct FfDisposition {
-    #[serde(default)]
-    default: Option<i64>,
-}
-
-fn normalize_vod_info(root: VodInfoRoot) -> ProbedTracks {
-    let Some(info) = root.info else {
-        return ProbedTracks {
-            provider: "xtream".into(),
-            ..Default::default()
-        };
+/// A non-empty, cleaned string — numbers are stringified, since panels
+/// send ids either way.
+fn string(v: &Value, key: &str) -> Option<String> {
+    let raw = match v.get(key)? {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        _ => return None,
     };
+    let cleaned = crate::sources::m3u::clean(&raw);
+    (!cleaned.is_empty()).then_some(cleaned)
+}
 
-    let mut audio: Vec<ProbedTrack> = Vec::new();
-    let mut subtitle: Vec<ProbedTrack> = Vec::new();
-
-    // Path 1: `streams` is the full ffprobe array — walk it and split by type.
-    for s in &info.streams {
-        match s.codec_type.as_deref() {
-            Some("audio") => audio.push(to_probed(s, true)),
-            Some("subtitle") => subtitle.push(to_probed(s, false)),
-            _ => {}
-        }
-    }
-
-    // Path 2: per-type arrays. Only use these if `streams` didn't already
-    // give us what we need — some panels duplicate the info across both.
-    if audio.is_empty() {
-        if let Some(primary) = &info.audio {
-            audio.push(to_probed(primary, true));
-        }
-        for s in &info.audio_additional {
-            audio.push(to_probed(s, true));
-        }
-    }
-    if subtitle.is_empty() {
-        for s in &info.subtitles {
-            subtitle.push(to_probed(s, false));
-        }
-    }
-
-    ProbedTracks {
-        audio,
-        subtitle,
-        provider: "xtream".into(),
+fn int(v: &Value, key: &str) -> Option<i64> {
+    match v.get(key)? {
+        Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
     }
 }
 
-fn to_probed(s: &FfStream, is_audio: bool) -> ProbedTrack {
-    let tags = s.tags.as_ref();
-    let language = tags.and_then(|t| t.language.clone()).filter(|v| !v.is_empty());
-    // Prefer explicit `tags.title`; fall back to `handler_name` when it's
-    // something informative (mp4 containers often stash "SoundHandler" here,
-    // which isn't — filter those out).
-    let title = tags
-        .and_then(|t| t.title.clone())
-        .or_else(|| {
-            tags.and_then(|t| t.handler_name.clone()).filter(|h| {
-                let lower = h.to_ascii_lowercase();
-                !lower.is_empty()
-                    && !lower.contains("handler")
-                    && !lower.contains("mainconcept")
-            })
-        })
-        .filter(|v| !v.is_empty());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
 
-    let channel_layout = if is_audio {
-        s.channel_layout
-            .clone()
-            .filter(|v| !v.is_empty())
-            .or_else(|| {
-                s.channels.and_then(|n| match n {
-                    1 => Some("Mono".into()),
-                    2 => Some("Stereo".into()),
-                    6 => Some("5.1".into()),
-                    7 => Some("6.1".into()),
-                    8 => Some("7.1".into()),
-                    n if n > 0 => Some(format!("{}ch", n)),
-                    _ => None,
-                })
-            })
-    } else {
-        None
-    };
+    #[test]
+    fn tolerant_field_access() {
+        let v = json!({ "a": 5, "b": "7", "c": " x\u{200B} ", "d": "", "e": null });
+        assert_eq!(int(&v, "a"), Some(5));
+        assert_eq!(int(&v, "b"), Some(7));
+        assert_eq!(string(&v, "a").as_deref(), Some("5"));
+        assert_eq!(string(&v, "c").as_deref(), Some("x"));
+        assert_eq!(string(&v, "d"), None);
+        assert_eq!(string(&v, "e"), None);
+    }
 
-    ProbedTrack {
-        index: s.index.unwrap_or(0),
-        codec: s.codec_name.clone().filter(|v| !v.is_empty()),
-        language,
-        title,
-        channel_layout,
-        is_default: s.disposition.as_ref().and_then(|d| d.default).unwrap_or(0) != 0,
+    #[test]
+    fn normalizes_pasted_hosts() {
+        assert_eq!(normalize_host("iptv.example.com:8080").unwrap(), "http://iptv.example.com:8080");
+        assert_eq!(normalize_host("https://h.tv/player_api.php?x=1").unwrap(), "https://h.tv");
+    }
+
+    #[test]
+    fn detects_xtream_m3u_links() {
+        let (host, u, p) =
+            credentials_from_m3u_url("http://h.tv:8080/get.php?username=al&password=pw&type=m3u_plus").unwrap();
+        assert_eq!((host.as_str(), u.as_str(), p.as_str()), ("http://h.tv:8080", "al", "pw"));
+        assert!(credentials_from_m3u_url("http://h.tv/playlist.m3u").is_none());
+    }
+
+    #[test]
+    fn parses_stream_urls() {
+        let x = parse_xtream_url("http://h:81/movie/u/p/42.mkv").unwrap();
+        assert_eq!((x.kind.as_str(), x.stream_id), ("movie", 42));
+        assert_eq!(parse_xtream_url("http://h/series/u/p/7").unwrap().stream_id, 7);
+        assert!(parse_xtream_url("http://h/other/u/p/7").is_none());
     }
 }
-
-/// Xtream returns timestamps as either `"1700000000"` or `"2024-01-01 12:00:00"`.
-#[allow(dead_code)]
-fn parse_ts(secs: Option<&str>, datetime: Option<&str>) -> Option<i64> {
-    if let Some(s) = secs {
-        if let Ok(n) = s.parse::<i64>() {
-            return Some(n);
-        }
-    }
-    if let Some(dt) = datetime {
-        if let Ok(t) = chrono::NaiveDateTime::parse_from_str(dt, "%Y-%m-%d %H:%M:%S") {
-            return Some(t.and_utc().timestamp());
-        }
-    }
-    None
-}
-

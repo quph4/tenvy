@@ -49,6 +49,12 @@ pub struct Channel {
     pub sort_order: i64,
     /// "live" | "movie" | "series"
     pub kind: String,
+    /// A series show whose episodes load on demand (`list_episodes`).
+    pub container: bool,
+    /// Set on episodes: the show (container) they belong to.
+    pub parent_id: Option<i64>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
