@@ -1,20 +1,19 @@
 # Builds a signed Windows installer when a version tag is pushed and
-# publishes it as a draft GitHub release, with the latest.json the in-app
-# updater reads. Review the draft, then publish it to roll the update out.
+# uploads it, with the latest.json the in-app updater reads, as a DRAFT
+# release in the public releases repo (quph4/qanal-releases). Smoke-test
+# the draft, then publish it to roll the update out.
 #
 # Required repository settings (see RELEASING.md):
-#   secrets.TAURI_SIGNING_PRIVATE_KEY           contents of lumen-updater.key
+#   secrets.TAURI_SIGNING_PRIVATE_KEY           contents of qanal-updater.key
 #   secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (may be empty)
+#   secrets.RELEASES_TOKEN                      fine-grained token, Contents: read & write
+#                                               on quph4/qanal-releases
 #   vars.MPV_URL / vars.MPV_SHA256              pinned mpv 7z build to bundle
 name: release
 
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
-
-permissions:
-  contents: write
 
 jobs:
   windows:
@@ -40,20 +39,24 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib
 
+      - name: Tag matches package.json
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} != package.json v$v" }
+
       - name: Bundle mpv
         shell: pwsh
         run: ./scripts/fetch-mpv.ps1 -Url "${{ vars.MPV_URL }}" -Sha256 "${{ vars.MPV_SHA256 }}"
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build signed installer
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          # From package.json, so a manual run can't create a tag named
-          # after the branch.
-          tagName: v__VERSION__
-          releaseName: 'Lumen v__VERSION__'
-          releaseBody: 'See CHANGELOG.md for what changed.'
-          releaseDraft: true
-          includeUpdaterJson: true
+        run: pnpm tauri build
+
+      - name: Draft release in qanal-releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: ./scripts/publish-release.ps1

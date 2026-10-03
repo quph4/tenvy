@@ -1,4 +1,5 @@
-import { ArrowDownToLine, ChevronDown, Loader2, Search, Settings2, Tv2 } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, Loader2, Search, Settings2 } from 'lucide-react'
+import { QanalMark } from './QanalMark'
 import { useUI } from '../stores/ui'
 import { usePlaylist } from '../stores/playlist'
 import { cn } from '../lib/cn'
@@ -13,9 +14,9 @@ export function Topbar() {
     <header className="flex h-12 items-center gap-3 border-b border-zinc-800/70 bg-zinc-950/80 px-4 backdrop-blur-md">
       <div className="flex items-center gap-2 text-zinc-100">
         <div className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-indigo-400 to-indigo-600 shadow-sm shadow-indigo-500/30">
-          <Tv2 className="h-4 w-4 text-zinc-950" strokeWidth={2.5} />
+          <QanalMark className="h-4 w-4 text-white" />
         </div>
-        <span className="text-sm font-semibold tracking-tight">Lumen</span>
+        <span className="text-sm font-semibold tracking-tight">Qanal</span>
       </div>
 
       <button

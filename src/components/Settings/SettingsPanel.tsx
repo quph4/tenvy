@@ -136,7 +136,7 @@ function AboutSection() {
       <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">About</span>
       <div className="mt-2 flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <div className="text-sm text-zinc-200">Lumen {__APP_VERSION__}</div>
+          <div className="text-sm text-zinc-200">Qanal {__APP_VERSION__}</div>
           {line && <div className="mt-0.5 text-[11px] text-zinc-500">{line}</div>}
         </div>
         {status.kind === 'available' ? (

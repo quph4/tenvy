@@ -38,8 +38,8 @@ type PinnedMap = Partial<Record<ChannelKind, string[]>>
 
 export function Sidebar() {
   const { groups, activeGroup, setActiveGroup, activeKind, setActiveKind } = usePlaylist()
-  const [pinned, setPinned] = usePref<PinnedMap>('lumen.sidebar.pinned', {})
-  const [sort, setSort] = usePref<GroupSort>('lumen.sidebar.groupSort', 'provider')
+  const [pinned, setPinned] = usePref<PinnedMap>('qanal.sidebar.pinned', {})
+  const [sort, setSort] = usePref<GroupSort>('qanal.sidebar.groupSort', 'provider')
 
   const pins = pinned[activeKind] ?? []
   const { pinnedGroups, otherGroups } = useMemo(() => {

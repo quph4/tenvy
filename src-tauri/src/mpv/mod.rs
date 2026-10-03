@@ -129,12 +129,12 @@ impl Mpv {
         // previous (dying) instance may still hold open.
         static SPAWN_SEQ: AtomicU64 = AtomicU64::new(0);
         let pipe_name = format!(
-            r"\\.\pipe\lumen-mpv-{}-{}",
+            r"\\.\pipe\qanal-mpv-{}-{}",
             std::process::id(),
             SPAWN_SEQ.fetch_add(1, Ordering::Relaxed)
         );
         let mpv_path = find_mpv_exe(bundled).ok_or_else(|| {
-            err!("mpv.exe not found. Reinstall Lumen, or install mpv from https://mpv.io.")
+            err!("mpv.exe not found. Reinstall Qanal, or install mpv from https://mpv.io.")
         })?;
 
         let mut cmd = std::process::Command::new(&mpv_path);
@@ -153,13 +153,13 @@ impl Mpv {
         // the parent's actual console handle, which pnpm/Tauri's dev
         // pipeline never attaches, so we lose every line. The log is
         // verbose and contains full stream URLs (credentials included), so
-        // release builds only write it when LUMEN_MPV_LOG is set — support
+        // release builds only write it when QANAL_MPV_LOG is set — support
         // can ask a user to turn it on.
-        if cfg!(debug_assertions) || std::env::var_os("LUMEN_MPV_LOG").is_some() {
-            let log_path = std::env::temp_dir().join("lumen-mpv.log");
+        if cfg!(debug_assertions) || std::env::var_os("QANAL_MPV_LOG").is_some() {
+            let log_path = std::env::temp_dir().join("qanal-mpv.log");
             cmd.arg(format!("--log-file={}", log_path.display()))
                 .arg("--msg-level=all=v");
-            tracing::info!(target: "lumen_lib", "mpv log file: {}", log_path.display());
+            tracing::info!(target: "qanal_lib", "mpv log file: {}", log_path.display());
         }
 
         // Hardware decoding in copy-back mode: frames are decoded on the
@@ -167,8 +167,8 @@ impl Mpv {
         // the same path as software decoding. Direct d3d11va presentation
         // has shown black rects under the WebView2 host, but copy-back
         // never touches that path, and takes 4K HEVC off the CPU.
-        // LUMEN_HWDEC overrides for troubleshooting (e.g. `no`).
-        let hwdec = std::env::var("LUMEN_HWDEC").unwrap_or_else(|_| "auto-copy-safe".into());
+        // QANAL_HWDEC overrides for troubleshooting (e.g. `no`).
+        let hwdec = std::env::var("QANAL_HWDEC").unwrap_or_else(|_| "auto-copy-safe".into());
 
         let child = cmd
             .arg("--idle=yes")
@@ -213,7 +213,7 @@ impl Mpv {
         job::adopt(&child);
 
         tracing::info!(
-            target: "lumen_lib",
+            target: "qanal_lib",
             "spawned mpv {} pid={} wid={} pipe={}",
             mpv_path.display(), child.id(), hwnd, pipe_name
         );
@@ -260,7 +260,7 @@ impl Mpv {
             .and_then(|v| v.get("data").and_then(|d| d.as_str()).map(str::to_string))
             .unwrap_or_default();
         mpv.legacy_loadfile = is_pre_0_38(&version);
-        tracing::info!(target: "lumen_lib", "{} (legacy loadfile: {})", version, mpv.legacy_loadfile);
+        tracing::info!(target: "qanal_lib", "{} (legacy loadfile: {})", version, mpv.legacy_loadfile);
         Ok((mpv, state_rx))
     }
 
@@ -307,7 +307,7 @@ impl Mpv {
     ) -> Result<()> {
         stream_url::validate(url)?;
         tracing::info!(
-            target: "lumen_lib",
+            target: "qanal_lib",
             "mpv load url={} start={:?} ua={} referrer={}",
             stream_url::redact(url),
             start_seconds,
@@ -345,7 +345,7 @@ impl Mpv {
     }
 
     pub async fn seek_absolute(&self, seconds: f64) -> Result<()> {
-        tracing::debug!(target: "lumen_lib", "mpv seek absolute={}", seconds);
+        tracing::debug!(target: "qanal_lib", "mpv seek absolute={}", seconds);
         self.command(&[json!("seek"), json!(seconds), json!("absolute")]).await?;
         Ok(())
     }
@@ -492,7 +492,7 @@ async fn pipe_task(
                 let val: Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(e) => {
-                        tracing::debug!(target: "lumen_lib", "mpv non-JSON: {} ({})", line, e);
+                        tracing::debug!(target: "qanal_lib", "mpv non-JSON: {} ({})", line, e);
                         continue;
                     }
                 };
@@ -543,7 +543,7 @@ async fn pipe_task(
         }
     }
 
-    tracing::warn!(target: "lumen_lib", "mpv pipe task exiting; reaping child");
+    tracing::warn!(target: "qanal_lib", "mpv pipe task exiting; reaping child");
     // Give mpv a moment to exit on its own (e.g. after `quit`), then kill.
     for _ in 0..20 {
         match child.try_wait() {
@@ -639,9 +639,9 @@ fn find_mpv_exe(bundled: Option<&Path>) -> Option<PathBuf> {
 
 /// Ties mpv's lifetime to ours. Every mpv we spawn is put in a Windows job
 /// object with KILL_ON_JOB_CLOSE; the job handle is held (never closed) for
-/// the life of this process, so when Lumen exits — cleanly, via a crash, or
+/// the life of this process, so when Qanal exits — cleanly, via a crash, or
 /// killed from Task Manager — the OS closes the handle and kills mpv too.
-/// Without this an orphaned mpv.exe can keep playing audio after Lumen is
+/// Without this an orphaned mpv.exe can keep playing audio after Qanal is
 /// gone.
 mod job {
     use std::os::windows::io::AsRawHandle;
@@ -676,12 +676,12 @@ mod job {
 
     pub fn adopt(child: &std::process::Child) {
         let Some(job) = job() else {
-            tracing::warn!(target: "lumen_lib", "could not create job object; mpv may outlive Lumen");
+            tracing::warn!(target: "qanal_lib", "could not create job object; mpv may outlive Qanal");
             return;
         };
         let process = HANDLE(child.as_raw_handle());
         if let Err(e) = unsafe { AssignProcessToJobObject(job, process) } {
-            tracing::warn!(target: "lumen_lib", "AssignProcessToJobObject failed: {}", e);
+            tracing::warn!(target: "qanal_lib", "AssignProcessToJobObject failed: {}", e);
         }
     }
 }

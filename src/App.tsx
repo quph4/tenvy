@@ -90,7 +90,7 @@ function App() {
           <span className="kbd mr-1">F</span>
           Fullscreen
         </span>
-        <span className="ml-auto tabular-nums text-zinc-600">Lumen · {__APP_VERSION__}</span>
+        <span className="ml-auto tabular-nums text-zinc-600">Qanal · {__APP_VERSION__}</span>
       </footer>}
 
       <SearchPalette />

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main Lumen window",
+  "description": "Capabilities for the main Qanal window",
   "windows": [
     "main"
   ],

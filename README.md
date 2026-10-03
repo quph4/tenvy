@@ -1,10 +1,10 @@
-# Lumen
+# Qanal – IPTV Player for Windows
 
 Lightweight Windows IPTV player — Tauri 2 + React + TypeScript. TiviMate-style
 grid EPG, M3U / Xtream Codes / XMLTV sources, and embedded mpv for playback so
 every codec (HEVC, AC-3, DTS, PGS subs, MKV alternate audio) Just Works.
 
-Lumen is a player only: it ships no channels or content. Users bring their own
+Qanal is a player only: it ships no channels or content. Users bring their own
 playlist from their own provider.
 
 ## Requirements
@@ -22,8 +22,8 @@ pnpm install
 pnpm tauri dev
 ```
 
-Set `LUMEN_MPV_LOG=1` to make release builds write `%TEMP%\lumen-mpv.log`
-(debug builds always do), and `LUMEN_HWDEC=no` to rule out hardware decoding.
+Set `QANAL_MPV_LOG=1` to make release builds write `%TEMP%\qanal-mpv.log`
+(debug builds always do), and `QANAL_HWDEC=no` to rule out hardware decoding.
 
 ## Test
 

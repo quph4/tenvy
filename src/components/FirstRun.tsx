@@ -1,4 +1,5 @@
-import { Plus, Tv2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
+import { QanalMark } from './QanalMark'
 import { useUI } from '../stores/ui'
 
 export function FirstRun() {
@@ -7,10 +8,10 @@ export function FirstRun() {
     <div className="grid flex-1 place-items-center bg-zinc-950">
       <div className="max-w-sm space-y-6 px-6 text-center animate-fade-in">
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-gradient-to-br from-indigo-400 to-indigo-600 shadow-lg shadow-indigo-500/20">
-          <Tv2 className="h-7 w-7 text-zinc-950" strokeWidth={2.5} />
+          <QanalMark className="h-8 w-8 text-white" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold text-zinc-100">Welcome to Lumen</h1>
+          <h1 className="text-lg font-semibold text-zinc-100">Welcome to Qanal</h1>
           <p className="mt-1.5 text-sm text-zinc-500">
             A lightweight IPTV player. Add a playlist to get started — M3U, Xtream Codes, or an XMLTV guide.
           </p>
