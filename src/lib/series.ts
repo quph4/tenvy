@@ -131,3 +131,11 @@ export function toEpisode(ch: Channel): Episode {
     subtitle: info ? info.subtitle : ch.parentId != null ? ch.name : null,
   }
 }
+
+/** What the library's details page is showing. */
+export type LibraryItem = { type: 'movie'; channel: Channel } | { type: 'show'; show: Show }
+
+/** A show wrapper for a provider series container (episodes load later). */
+export function showFromContainer(ch: Channel): Show {
+  return { key: `c:${ch.id}`, name: ch.name, logo: ch.logo, group: ch.group, episodes: [], container: ch }
+}

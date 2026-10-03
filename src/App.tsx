@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Topbar } from './components/Topbar'
 import { Sidebar } from './components/Sidebar'
 import { ChannelList } from './components/ChannelList'
+import { Library } from './components/Library/Library'
 import { Player } from './components/Player/Player'
 import { EPGGrid } from './components/EPG/EPGGrid'
 import { SearchPalette } from './components/Search/SearchPalette'
@@ -22,11 +23,15 @@ import { useKeyboardShortcuts } from './hooks/useKeyboard'
 import { subscribe } from './lib/ipc'
 
 function App() {
-  const { sources, hydrate } = usePlaylist()
+  const { sources, hydrate, activeKind } = usePlaylist()
   const { view } = useUI()
   // Fullscreen and the mini player both show only the video.
   const mini = usePlayback((s) => s.mini)
   const chromeless = usePlayback((s) => s.fullscreen || s.mini)
+  // Movies and series are browsed in the library; once one plays, the
+  // player takes the whole width (with a way back to the library).
+  const libraryTab = activeKind !== 'live'
+  const watchingVod = usePlayback((s) => !!s.channel && s.channel.kind !== 'live')
 
   useEffect(() => {
     hydrate().catch(() => {
@@ -66,6 +71,13 @@ function App() {
             {!chromeless && <Sidebar />}
             <EPGGrid />
           </>
+        ) : libraryTab && !watchingVod && !mini ? (
+          <>
+            {!chromeless && <Sidebar />}
+            <Library />
+          </>
+        ) : libraryTab ? (
+          <Player />
         ) : (
           <>
             {!chromeless && <Sidebar />}

@@ -59,6 +59,7 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
             None => line.to_string(),
         };
         let kind = detect_kind(&stream_url).to_string();
+        let year = if kind == "live" { None } else { year_in(&entry.name) };
         out.push(ChannelInsert {
             tvg_id: entry.tvg_id,
             name: if entry.name.is_empty() {
@@ -69,6 +70,7 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
             logo: entry.logo,
             group: entry.group,
             stream_url,
+            year,
             kind,
             user_agent: entry.user_agent,
             referrer: entry.referrer,
@@ -80,6 +82,35 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
         return Err(err!("The playlist contains no channels."));
     }
     Ok(out)
+}
+
+/// A release year written into a title the way providers do it:
+/// "Movie [2021]", "Movie (1999)", "Movie [PRE] [2021]", "Movie - 2009".
+/// Takes the last bracketed 19xx/20xx (or a trailing " - YYYY") so a year
+/// in the title itself doesn't win.
+pub(crate) fn year_in(name: &str) -> Option<i64> {
+    let trimmed = name.trim_end();
+    if let Some((head, tail)) = trimmed.rsplit_once(" - ") {
+        if !head.is_empty() && tail.len() == 4 && tail.bytes().all(|b| b.is_ascii_digit()) {
+            let y: i64 = tail.parse().ok()?;
+            if (1900..=2100).contains(&y) {
+                return Some(y);
+            }
+        }
+    }
+    let bytes = name.as_bytes();
+    let mut found = None;
+    for (i, w) in bytes.windows(6).enumerate() {
+        let open = w[0] == b'[' || w[0] == b'(';
+        let close = w[5] == b']' || w[5] == b')';
+        if open && close && w[1..5].iter().all(u8::is_ascii_digit) {
+            let y: i64 = name[i + 1..i + 5].parse().ok()?;
+            if (1900..=2100).contains(&y) {
+                found = Some(y);
+            }
+        }
+    }
+    found
 }
 
 /// The guide URL a playlist advertises in its header, e.g.
@@ -279,6 +310,16 @@ mod tests {
         assert_eq!(out[0].kind, "live");
         assert_eq!(out[1].name, "Plain Channel");
         assert!(out[1].group.is_none());
+    }
+
+    #[test]
+    fn finds_release_years() {
+        assert_eq!(year_in("Mickey's Once Upon a Christmas [KIDS] [1999]"), Some(1999));
+        assert_eq!(year_in("Blade Runner 2049 (2017)"), Some(2017));
+        assert_eq!(year_in("Movie [PRE] [2021] [4K]"), Some(2021));
+        assert_eq!(year_in("Zombieland - 2009"), Some(2009));
+        assert_eq!(year_in("Blade Runner - 2049 - 2017"), Some(2017));
+        assert_eq!(year_in("2012"), None);
     }
 
     #[test]

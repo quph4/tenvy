@@ -81,6 +81,7 @@ pub fn run() {
             commands::list_channels,
             commands::search_channels,
             commands::list_episodes,
+            commands::vod_details,
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,

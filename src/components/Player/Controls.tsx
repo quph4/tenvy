@@ -1,4 +1,5 @@
 import {
+  ArrowLeft,
   Captions,
   CaptionsOff,
   ExternalLink,
@@ -19,6 +20,8 @@ import { ipc } from '../../lib/ipc'
 import { cn } from '../../lib/cn'
 import { hhmm } from '../../lib/time'
 import { openInExternalPlayer } from '../../lib/externalPlayer'
+import { displayTitle } from '../../lib/titles'
+import { usePlaylist } from '../../stores/playlist'
 
 export type PickerKind = 'audio' | 'subtitle' | null
 
@@ -56,10 +59,14 @@ export function Controls({
     setMini,
   } = usePlayback()
   const { push } = useToast()
+  const activeKind = usePlaylist((s) => s.activeKind)
 
   if (!channel) return null
 
   const isVod = channel.kind === 'movie' || channel.kind === 'series'
+  // In the library's full-width player, stopping returns to the library
+  // (the details page the title was started from stays selected).
+  const backToLibrary = isVod && activeKind !== 'live' && !mini
 
   const openExternal = async () => {
     try {
@@ -82,6 +89,16 @@ export function Controls({
       )}
 
       <div className="flex items-center gap-3">
+        {backToLibrary && (
+          <button
+            onClick={() => usePlayback.getState().stop()}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
+            title="Stop and go back to the library"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Library
+          </button>
+        )}
         <button
           onClick={() => setPlaying(!playing)}
           className="grid h-9 w-9 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
@@ -130,7 +147,7 @@ export function Controls({
             </>
           ) : (
             <div className="mr-1 hidden max-w-[20rem] truncate text-xs text-white/70 sm:block">
-              {channel.name}
+              {isVod ? displayTitle(channel.name) : channel.name}
             </div>
           )}
 

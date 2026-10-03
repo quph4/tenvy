@@ -10,6 +10,7 @@ import type {
   Programme,
   Source,
   SourceKind,
+  VodDetails,
 } from '../types'
 
 // Typed wrappers so the rest of the app doesn't know `invoke()` exists.
@@ -60,6 +61,10 @@ export const ipc = {
    *  Fetched from the provider each call, served from cache offline. */
   async listEpisodes(channelId: number): Promise<Channel[]> {
     return invoke('list_episodes', { channelId })
+  },
+  /** Plot, cast, artwork and trailer for a movie or series (cached). */
+  async vodDetails(channelId: number): Promise<VodDetails> {
+    return invoke('vod_details', { channelId })
   },
 
   // ---- Watch history ----

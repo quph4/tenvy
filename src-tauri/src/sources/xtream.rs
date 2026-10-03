@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::db::ChannelInsert;
+use crate::models::VodDetails;
 use crate::err;
 use crate::error::Result;
 
@@ -161,12 +162,16 @@ impl Xtream {
             .filter_map(|s| {
                 let id = int(s, "stream_id")?;
                 let ext = string(s, "container_extension").unwrap_or_else(|| "mp4".into());
+                let name = string(s, "name").unwrap_or_else(|| format!("Movie {}", id));
                 Some(ChannelInsert {
-                    name: string(s, "name").unwrap_or_else(|| format!("Movie {}", id)),
+                    year: crate::sources::m3u::year_in(&name),
+                    name,
                     logo: string(s, "stream_icon").or_else(|| string(s, "cover")),
                     group: string(s, "category_id").and_then(|c| cats.get(&c).cloned()),
                     stream_url: self.stream_url("movie", id, &ext),
                     kind: "movie".into(),
+                    rating: rating(s),
+                    added: int(s, "added"),
                     ..Default::default()
                 })
             })
@@ -184,8 +189,15 @@ impl Xtream {
             .iter()
             .filter_map(|s| {
                 let id = int(s, "series_id")?;
+                let name = string(s, "name").unwrap_or_else(|| format!("Series {}", id));
                 Some(ChannelInsert {
-                    name: string(s, "name").unwrap_or_else(|| format!("Series {}", id)),
+                    year: string(s, "releaseDate")
+                        .or_else(|| string(s, "release_date"))
+                        .and_then(|d| d.get(..4).and_then(|y| y.parse().ok()))
+                        .or_else(|| crate::sources::m3u::year_in(&name)),
+                    rating: rating(s),
+                    added: int(s, "last_modified"),
+                    name,
                     logo: string(s, "cover"),
                     group: string(s, "category_id").and_then(|c| cats.get(&c).cloned()),
                     // Not playable — identifies the show (see db::channel_key).
@@ -270,6 +282,48 @@ impl Xtream {
         format!("{}/{}/{}/{}/{}.{}", self.host, kind, self.username, self.password, id, ext)
     }
 
+    /// Details page data for a movie (`get_vod_info`).
+    pub async fn vod_details(&self, vod_id: i64) -> Result<VodDetails> {
+        let v = self.get_json(Some("get_vod_info"), &[("vod_id", &vod_id.to_string())]).await?;
+        let info = v.get("info").cloned().unwrap_or(Value::Null);
+        Ok(VodDetails {
+            plot: string(&info, "plot").or_else(|| string(&info, "description")),
+            genre: string(&info, "genre"),
+            cast: string(&info, "cast").or_else(|| string(&info, "actors")),
+            director: string(&info, "director"),
+            release_date: string(&info, "releasedate").or_else(|| string(&info, "release_date")),
+            rating: rating(&info),
+            duration: int(&info, "duration_secs")
+                .filter(|s| *s > 0)
+                .map(format_runtime)
+                .or_else(|| string(&info, "duration")),
+            poster: string(&info, "movie_image").or_else(|| string(&info, "cover_big")),
+            backdrop: first_url(info.get("backdrop_path")),
+            trailer: trailer_url(&info),
+        })
+    }
+
+    /// Details page data for a series (the `info` part of
+    /// `get_series_info`; episodes come from `fetch_episodes`).
+    pub async fn series_details(&self, series_id: i64) -> Result<VodDetails> {
+        let v = self
+            .get_json(Some("get_series_info"), &[("series_id", &series_id.to_string())])
+            .await?;
+        let info = v.get("info").cloned().unwrap_or(Value::Null);
+        Ok(VodDetails {
+            plot: string(&info, "plot"),
+            genre: string(&info, "genre"),
+            cast: string(&info, "cast"),
+            director: string(&info, "director"),
+            release_date: string(&info, "releaseDate").or_else(|| string(&info, "release_date")),
+            rating: rating(&info),
+            duration: int(&info, "episode_run_time").filter(|m| *m > 0).map(|m| format!("{} min per episode", m)),
+            poster: string(&info, "cover"),
+            backdrop: first_url(info.get("backdrop_path")),
+            trailer: trailer_url(&info),
+        })
+    }
+
     /// Catch-up days per live stream id, for channels the panel archives.
     /// Used to enrich M3U playlists that came from this panel's get.php,
     /// which don't carry the archive flags themselves.
@@ -324,6 +378,44 @@ fn utc_offset_in(zone: Option<&str>, at: i64) -> i64 {
     chrono::DateTime::from_timestamp(at, 0)
         .map(|t| tz.offset_from_utc_datetime(&t.naive_utc()).fix().local_minus_utc() as i64)
         .unwrap_or(0)
+}
+
+/// Rating out of 10: `rating` when it looks like a 0–10 score, else
+/// `rating_5based` doubled. Zero means "unrated" on most panels.
+fn rating(v: &Value) -> Option<f64> {
+    let num = |key: &str| match v.get(key)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    num("rating")
+        .filter(|r| *r > 0.0 && *r <= 10.0)
+        .or_else(|| num("rating_5based").filter(|r| *r > 0.0 && *r <= 5.0).map(|r| r * 2.0))
+        .map(|r| (r * 10.0).round() / 10.0)
+}
+
+/// `backdrop_path` arrives as a JSON array, a single URL, or a Python-style
+/// list printed into a string (`"['https://…']"`) depending on the panel.
+fn first_url(v: Option<&Value>) -> Option<String> {
+    let text = match v? {
+        Value::Array(items) => return items.iter().find_map(|i| i.as_str()).map(str::to_string).filter(|s| s.starts_with("http")),
+        Value::String(s) => s.as_str(),
+        _ => return None,
+    };
+    let start = text.find("http")?;
+    let rest = &text[start..];
+    let end = rest.find(|c: char| c == '\'' || c == '"' || c == ',' || c == ']' || c.is_whitespace()).unwrap_or(rest.len());
+    Some(rest[..end].to_string())
+}
+
+fn trailer_url(info: &Value) -> Option<String> {
+    let t = string(info, "youtube_trailer")?;
+    Some(if t.starts_with("http") { t } else { format!("https://www.youtube.com/watch?v={}", t) })
+}
+
+fn format_runtime(secs: i64) -> String {
+    let (h, m) = (secs / 3600, (secs % 3600) / 60);
+    if h > 0 { format!("{}h {}m", h, m) } else { format!("{} min", m) }
 }
 
 /// `tv_archive_duration` days when `tv_archive` is on.
@@ -466,6 +558,24 @@ mod tests {
         assert_eq!(utc_offset_in(Some("Europe/Stockholm"), 1_796_126_400), 3600);
         assert_eq!(utc_offset_in(Some("Not/AZone"), 1_782_907_200), 0);
         assert_eq!(utc_offset_in(None, 1_782_907_200), 0);
+    }
+
+    #[test]
+    fn reads_library_metadata() {
+        assert_eq!(rating(&json!({"rating": "7.145"})), Some(7.1));
+        assert_eq!(rating(&json!({"rating": "0", "rating_5based": 3.5})), Some(7.0));
+        assert_eq!(rating(&json!({"rating": ""})), None);
+        assert_eq!(
+            first_url(Some(&json!("['https://image.tmdb.org/t/p/w1280/a.jpg']"))).as_deref(),
+            Some("https://image.tmdb.org/t/p/w1280/a.jpg")
+        );
+        assert_eq!(first_url(Some(&json!(["https://x/b.jpg"]))).as_deref(), Some("https://x/b.jpg"));
+        assert_eq!(first_url(Some(&json!(""))), None);
+        assert_eq!(format_runtime(3968), "1h 6m");
+        assert_eq!(
+            trailer_url(&json!({"youtube_trailer": "yKOeF8v67OI"})).as_deref(),
+            Some("https://www.youtube.com/watch?v=yKOeF8v67OI")
+        );
     }
 
     #[test]

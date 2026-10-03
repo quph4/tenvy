@@ -71,10 +71,11 @@ export function SearchPalette() {
     // The Player only exists in the player view, so picking something has
     // to switch back to it — otherwise playback starts out of sight.
     useUI.getState().setView('player')
-    if (ch.container) {
-      usePlaylist.getState().openSeries(ch).catch(() => {})
-    } else {
+    // Live channels play; movies and series open their details page.
+    if (ch.kind === 'live') {
       usePlayback.getState().requestPlay(ch)
+    } else {
+      usePlaylist.getState().openDetails(ch).catch(() => {})
     }
   }
 

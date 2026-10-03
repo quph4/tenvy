@@ -1,6 +1,7 @@
 pub mod mpv_state;
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, State};
 
@@ -9,7 +10,7 @@ use crate::err;
 use crate::error::Result;
 use crate::models::{
     AddSourceReq, Channel, Group, HistoryEntry, HistoryProgress, PlaylistProgress, Programme,
-    Source, SourceKind,
+    Source, SourceKind, VodDetails,
 };
 use crate::sources::xtream::{self, Xtream};
 use crate::sources::{m3u, xmltv};
@@ -18,7 +19,13 @@ use crate::sources::{m3u, xmltv};
 pub struct AppState {
     pub db: Db,
     pub http: reqwest::Client,
+    /// Details pages fetched recently, keyed by channel id. Metadata
+    /// rarely changes; caching keeps browsing back and forth instant and
+    /// spares the provider's API.
+    pub details_cache: std::sync::Mutex<HashMap<i64, (Instant, VodDetails)>>,
 }
+
+const DETAILS_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 
 impl AppState {
     pub fn new(db: Db) -> Self {
@@ -33,6 +40,7 @@ impl AppState {
                 .read_timeout(Duration::from_secs(60))
                 .build()
                 .expect("http client"),
+            details_cache: std::sync::Mutex::new(HashMap::new()),
         }
     }
 }
@@ -102,10 +110,29 @@ pub async fn remove_source(state: State<'_, AppState>, id: i64) -> Result<()> {
 
 async fn ingest(app: &AppHandle, state: &State<'_, AppState>, id: i64) -> Result<()> {
     let db = state.db.clone();
-    let (source, username, password) =
+    let (mut source, mut username, mut password) =
         tokio::task::spawn_blocking(move || db::get_source_credentials(&db, id)).await??;
 
     emit_progress(app, id, "fetching", 0);
+
+    // A playlist from an Xtream panel's get.php is better served by the
+    // panel's API: series as shows with artwork instead of a flat list of
+    // episodes, plus library metadata. Upgrade it once; this first
+    // Xtream sync reshapes most rows, so the mass-deletion guard is off.
+    let mut guard = true;
+    if matches!(source.kind, SourceKind::M3u) {
+        if let Some((host, user, pass)) = xtream::credentials_from_m3u_url(&source.url) {
+            let db = state.db.clone();
+            let (h, u, p) = (host.clone(), user.clone(), pass.clone());
+            tokio::task::spawn_blocking(move || db::convert_source_to_xtream(&db, id, &h, &u, &p)).await??;
+            tracing::info!(target: "tenvy_lib", "source {} upgraded from get.php M3U to Xtream", id);
+            source.kind = SourceKind::Xtream;
+            source.url = host;
+            username = Some(user);
+            password = Some(pass);
+            guard = false;
+        }
+    }
 
     match source.kind {
         SourceKind::M3u => ingest_m3u(app, state, &source).await?,
@@ -116,6 +143,7 @@ async fn ingest(app: &AppHandle, state: &State<'_, AppState>, id: i64) -> Result
                 &source,
                 username.as_deref().unwrap_or(""),
                 password.as_deref().unwrap_or(""),
+                guard,
             )
             .await?
         }
@@ -180,6 +208,7 @@ async fn ingest_xtream(
     source: &Source,
     username: &str,
     password: &str,
+    guard: bool,
 ) -> Result<()> {
     let xt = Xtream::new(&source.url, username, password, state.http.clone())?;
     let catalogue = xt.fetch_catalogue().await?;
@@ -192,7 +221,7 @@ async fn ingest_xtream(
     let db = state.db.clone();
     let sid = source.id;
     tokio::task::spawn_blocking(move || {
-        db::replace_channels(&db, sid, &catalogue.kinds, &catalogue.channels)
+        db::replace_channels_guarded(&db, sid, &catalogue.kinds, &catalogue.channels, guard)
     })
     .await??;
 
@@ -312,6 +341,48 @@ pub(crate) async fn catchup_url(state: &AppState, channel_id: i64, start: i64, s
     let offset = xt.server_utc_offset(start).await?;
     let minutes = (stop.max(start + 60) - start + 59) / 60;
     xt.catchup_url(stream_id, start, minutes, offset)
+}
+
+/// Details page for a movie or series: plot, cast, artwork, trailer.
+/// Needs an Xtream panel behind the source; otherwise returns what the
+/// playlist itself knows (title art only).
+#[tauri::command]
+pub async fn vod_details(state: State<'_, AppState>, channel_id: i64) -> Result<VodDetails> {
+    if let Some((at, d)) = state.details_cache.lock().unwrap().get(&channel_id) {
+        if at.elapsed() < DETAILS_TTL {
+            return Ok(d.clone());
+        }
+    }
+    let db = state.db.clone();
+    let channel = tokio::task::spawn_blocking(move || db::get_channel(&db, channel_id))
+        .await??
+        .ok_or_else(|| err!("Not found"))?;
+    let fallback = VodDetails {
+        poster: channel.logo.clone(),
+        rating: channel.rating,
+        ..Default::default()
+    };
+    let Some(xt) = xtream_for_source(&state, channel.source_id).await? else {
+        return Ok(fallback);
+    };
+    let Some(id) = xtream::parse_xtream_url(&channel.stream_url).map(|x| x.stream_id) else {
+        return Ok(fallback);
+    };
+    let mut details = if channel.container {
+        xt.series_details(id).await?
+    } else if channel.kind == "movie" {
+        xt.vod_details(id).await?
+    } else {
+        return Ok(fallback);
+    };
+    details.poster = details.poster.or(channel.logo);
+    details.rating = details.rating.or(channel.rating);
+    state
+        .details_cache
+        .lock()
+        .unwrap()
+        .insert(channel_id, (Instant::now(), details.clone()));
+    Ok(details)
 }
 
 // ---------- channels ----------

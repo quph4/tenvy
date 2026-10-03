@@ -31,6 +31,24 @@ export interface Channel {
   episode: number | null
   /** Days of catch-up the provider keeps (live channels), else null. */
   archiveDays: number | null
+  /** Movies/series: rating out of 10, release year, provider-added time. */
+  rating: number | null
+  year: number | null
+  added: number | null
+}
+
+/** A movie or series details page (see Rust models::VodDetails). */
+export interface VodDetails {
+  plot: string | null
+  genre: string | null
+  cast: string | null
+  director: string | null
+  releaseDate: string | null
+  rating: number | null
+  duration: string | null
+  poster: string | null
+  backdrop: string | null
+  trailer: string | null
 }
 
 export interface Programme {

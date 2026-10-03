@@ -76,6 +76,11 @@ fn migrate(conn: &Connection) -> Result<()> {
         // Days of catch-up the provider keeps for a live channel (Xtream
         // tv_archive_duration); NULL = no catch-up.
         ("archive_days", "ALTER TABLE channels ADD COLUMN archive_days INTEGER"),
+        // Library metadata for movies/series: rating out of 10, release
+        // year, and when the provider added it (epoch seconds).
+        ("rating", "ALTER TABLE channels ADD COLUMN rating REAL"),
+        ("year", "ALTER TABLE channels ADD COLUMN year INTEGER"),
+        ("added", "ALTER TABLE channels ADD COLUMN added INTEGER"),
     ] {
         if !column_exists(conn, "channels", col)? {
             conn.execute(ddl, [])?;
@@ -115,7 +120,8 @@ fn migrate(conn: &Connection) -> Result<()> {
 const CHANNEL_COLS: &str = "c.id, c.source_id, \
      COALESCE(c.tvg_id, (SELECT e.id FROM epg_channels e WHERE e.name_key = c.name_key LIMIT 1)) AS tvg_id, \
      c.name, c.logo, c.group_name, c.stream_url, \
-     c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode, c.archive_days";
+     c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode, c.archive_days, \
+     c.rating, c.year, c.added";
 
 fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
@@ -152,6 +158,9 @@ fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<Channel> {
         season: row.get("season")?,
         episode: row.get("episode")?,
         archive_days: row.get("archive_days")?,
+        rating: row.get("rating")?,
+        year: row.get("year")?,
+        added: row.get("added")?,
     })
 }
 
@@ -217,6 +226,18 @@ pub fn insert_source(
     Ok(conn.last_insert_rowid())
 }
 
+/// Turn an M3U source that points at an Xtream panel's get.php into a
+/// proper Xtream source. The API gives series as shows (not hundreds of
+/// thousands of loose episodes), cleaner categories and library metadata.
+pub fn convert_source_to_xtream(db: &Db, id: i64, host: &str, user: &str, pass: &str) -> Result<()> {
+    let conn = db.write();
+    conn.execute(
+        "UPDATE sources SET kind = 'xtream', url = ?2, username = ?3, password = ?4 WHERE id = ?1",
+        params![id, host, user, pass],
+    )?;
+    Ok(())
+}
+
 pub fn delete_source(db: &Db, id: i64) -> Result<()> {
     let conn = db.write();
     conn.execute("DELETE FROM sources WHERE id = ?1", [id])?;
@@ -252,6 +273,19 @@ pub fn replace_channels(
     kinds: &[&str],
     channels: &[ChannelInsert],
 ) -> Result<usize> {
+    replace_channels_guarded(db, source_id, kinds, channels, true)
+}
+
+/// `replace_channels` with the mass-deletion guard optional — off only
+/// for deliberate format changes (see `convert_source_to_xtream`), where
+/// most rows legitimately change identity.
+pub fn replace_channels_guarded(
+    db: &Db,
+    source_id: i64,
+    kinds: &[&str],
+    channels: &[ChannelInsert],
+    guard: bool,
+) -> Result<usize> {
     let mut conn = db.write();
     let tx = conn.transaction()?;
     let (kind, url): (String, String) = tx.query_row(
@@ -264,7 +298,7 @@ pub fn replace_channels(
     // an ordinary M3U's paths can look the same by accident.
     let xtream_ids = kind == SourceKind::Xtream.as_str()
         || crate::sources::xtream::credentials_from_m3u_url(&url).is_some();
-    sync_rows(&tx, source_id, None, Some(kinds), None, xtream_ids, channels)?;
+    sync_rows(&tx, source_id, None, Some(kinds), None, xtream_ids, guard, channels)?;
     tx.commit()?;
     Ok(channels.len())
 }
@@ -280,7 +314,7 @@ pub fn replace_episodes(db: &Db, parent_id: i64, episodes: &[ChannelInsert]) -> 
             [parent_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        sync_rows(&tx, source_id, Some(parent_id), None, group.as_deref(), true, episodes)?;
+        sync_rows(&tx, source_id, Some(parent_id), None, group.as_deref(), true, true, episodes)?;
         tx.commit()?;
     }
     list_episodes(db, parent_id)
@@ -314,6 +348,7 @@ fn sync_rows(
     kinds: Option<&[&str]>,
     group: Option<&str>,
     xtream_ids: bool,
+    guard: bool,
     items: &[ChannelInsert],
 ) -> Result<()> {
     let mut existing: HashMap<String, VecDeque<i64>> = HashMap::new();
@@ -348,7 +383,7 @@ fn sync_rows(
             }
         }
         let vanishing: usize = unclaimed.values().sum();
-        if existing_total >= MASS_DELETE_MIN_ROWS && vanishing * 10 > existing_total * 7 {
+        if guard && existing_total >= MASS_DELETE_MIN_ROWS && vanishing * 10 > existing_total * 7 {
             return Err(crate::err!(
                 "The provider returned only {} items where there were {} before. Keeping your                  current list — try refreshing again later, or remove and re-add the playlist                  if this change is expected.",
                 items.len(),
@@ -362,14 +397,16 @@ fn sync_rows(
             "UPDATE channels
                 SET tvg_id = ?2, name = ?3, logo = ?4, group_name = ?5, stream_url = ?6,
                     sort_order = ?7, kind = ?8, container = ?9, season = ?10, episode = ?11,
-                    name_key = ?12, user_agent = ?13, referrer = ?14, archive_days = ?15
+                    name_key = ?12, user_agent = ?13, referrer = ?14, archive_days = ?15,
+                    rating = ?16, year = ?17, added = ?18
               WHERE id = ?1",
         )?;
         let mut insert = tx.prepare(
             "INSERT INTO channels(source_id, parent_id, tvg_id, name, logo, group_name, stream_url,
                                   sort_order, kind, container, season, episode,
-                                  name_key, user_agent, referrer, archive_days)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                                  name_key, user_agent, referrer, archive_days, rating, year, added)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+                     ?17, ?18, ?19)",
         )?;
         for (i, c) in items.iter().enumerate() {
             let group = group.or(c.group.as_deref());
@@ -387,14 +424,14 @@ fn sync_rows(
                     update.execute(params![
                         id, tvg_id, c.name, c.logo, group, c.stream_url, i as i64, c.kind,
                         c.container, c.season, c.episode, name_key, c.user_agent, c.referrer,
-                        c.archive_days,
+                        c.archive_days, c.rating, c.year, c.added,
                     ])?;
                 }
                 None => {
                     insert.execute(params![
                         source_id, parent_id, tvg_id, c.name, c.logo, group, c.stream_url,
                         i as i64, c.kind, c.container, c.season, c.episode, name_key,
-                        c.user_agent, c.referrer, c.archive_days,
+                        c.user_agent, c.referrer, c.archive_days, c.rating, c.year, c.added,
                     ])?;
                 }
             }
@@ -444,6 +481,10 @@ pub struct ChannelInsert {
     pub referrer: Option<String>,
     /// Days of catch-up available (live channels only).
     pub archive_days: Option<i64>,
+    /// Movies/series: rating out of 10, release year, provider's added time.
+    pub rating: Option<f64>,
+    pub year: Option<i64>,
+    pub added: Option<i64>,
 }
 
 /// What the player needs to open a channel.

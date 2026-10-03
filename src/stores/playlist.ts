@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Channel, ChannelKind, Group, Source } from '../types'
 import { ipc } from '../lib/ipc'
 import { useHistory } from './history'
+import { showFromContainer, type LibraryItem } from '../lib/series'
 
 interface PlaylistState {
   sources: Source[]
@@ -16,16 +17,16 @@ interface PlaylistState {
   channels: Channel[]
   loadingChannels: boolean
 
-  /** Series drilldown: the `Show.key` whose episodes are on screen. */
-  openShowKey: string | null
+  /** Library details page: the movie or show on screen, if any. */
+  selected: LibraryItem | null
 
   hydrate(): Promise<void>
   setActiveSource(id: number | null): Promise<void>
   setActiveKind(kind: ChannelKind): Promise<void>
   setActiveGroup(group: string | null): Promise<void>
-  setOpenShowKey(key: string | null): void
-  /** Navigate to a provider-structured series (e.g. from search). */
-  openSeries(show: Channel): Promise<void>
+  select(item: LibraryItem | null): void
+  /** Open a movie or series details page from anywhere (e.g. search). */
+  openDetails(ch: Channel): Promise<void>
   refreshChannels(): Promise<void>
 }
 
@@ -40,7 +41,7 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   activeGroup: null,
   channels: [],
   loadingChannels: false,
-  openShowKey: null,
+  selected: null,
 
   async hydrate() {
     const sources = await ipc.listSources()
@@ -56,7 +57,7 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   },
 
   async setActiveSource(id) {
-    set({ activeSourceId: id, activeGroup: null, openShowKey: null })
+    set({ activeSourceId: id, activeGroup: null, selected: null })
     const { activeKind } = get()
     const groups = await ipc.listGroups(id, activeKind)
     set({ groups })
@@ -65,7 +66,7 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
 
   async setActiveKind(kind) {
     if (get().activeKind === kind) return
-    set({ activeKind: kind, activeGroup: null, openShowKey: null })
+    set({ activeKind: kind, activeGroup: null, selected: null })
     const { activeSourceId } = get()
     const groups = await ipc.listGroups(activeSourceId, kind)
     set({ groups })
@@ -73,18 +74,22 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   },
 
   async setActiveGroup(group) {
-    set({ activeGroup: group, openShowKey: null })
+    set({ activeGroup: group, selected: null })
     await get().refreshChannels()
   },
 
-  setOpenShowKey(key) {
-    set({ openShowKey: key })
+  select(item) {
+    set({ selected: item })
   },
 
-  async openSeries(show) {
-    if (get().activeKind !== 'series') await get().setActiveKind('series')
-    if (get().activeGroup !== null) await get().setActiveGroup(null)
-    set({ openShowKey: `c:${show.id}` })
+  async openDetails(ch) {
+    const kind = ch.kind === 'live' ? 'live' : ch.kind
+    if (get().activeKind !== kind) await get().setActiveKind(kind)
+    set({
+      selected: ch.container
+        ? { type: 'show', show: showFromContainer(ch) }
+        : { type: 'movie', channel: ch },
+    })
   },
 
   async refreshChannels() {

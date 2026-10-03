@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDownAZ, ArrowDownWideNarrow, ChevronLeft, History, Star } from 'lucide-react'
+import { ArrowDownAZ, ArrowDownWideNarrow, History, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayback } from '../stores/playback'
 import { usePlaylist, HISTORY_GROUP } from '../stores/playlist'
@@ -7,7 +7,6 @@ import { useHistory, isResumable, fmtResume } from '../stores/history'
 import { ipc } from '../lib/ipc'
 import { useToast } from '../stores/toast'
 import { cn } from '../lib/cn'
-import { groupByShow, toEpisode, type Episode, type Show } from '../lib/series'
 import { usePref } from '../lib/prefs'
 import { useNowPlaying } from '../stores/nowPlaying'
 import type { Channel, HistoryProgress } from '../types'
@@ -22,62 +21,30 @@ const ROW_HEIGHT = 56
  */
 type SortMode = 'added' | 'name'
 
+/**
+ * The live-TV channel list. Movies and series are browsed in the library
+ * (components/Library) instead.
+ */
 export function ChannelList() {
-  const { channels, loadingChannels, activeGroup, activeKind } = usePlaylist()
+  const { channels, loadingChannels, activeGroup } = usePlaylist()
   const current = usePlayback((s) => s.channel)
-  const requestPlay = usePlayback((s) => s.requestPlay)
+  const play = usePlayback((s) => s.requestPlay)
   const isHistory = activeGroup === HISTORY_GROUP
-  const play = requestPlay
-  // Lives in the store (and is reset there on group/kind changes) so that
-  // search can open a show directly.
-  const openShowKey = usePlaylist((s) => s.openShowKey)
-  const setOpenShowKey = usePlaylist((s) => s.setOpenShowKey)
   const [sort, setSort] = usePref<SortMode>('tenvy.channels.sort', 'added')
 
   const sortedChannels = useMemo(() => sortChannels(channels, sort), [channels, sort])
 
-  const isSeries = activeKind === 'series'
-  const shows = useMemo(
-    () => (isSeries ? sortShows(groupByShow(sortedChannels), sort) : []),
-    [isSeries, sortedChannels, sort],
-  )
-  const openShow = isSeries && openShowKey ? shows.find((s) => s.key === openShowKey) ?? null : null
-  const remote = useRemoteEpisodes(openShow?.container ?? null)
-  const openEpisodes = openShow?.container ? remote.episodes : openShow?.episodes ?? []
-
   const label =
-    openShow?.name ??
-    (activeGroup === '__favorites'
-      ? 'Favorites'
-      : isHistory
-        ? 'History'
-        : activeGroup ?? 'All channels')
-
-  const totalCount = isSeries
-    ? openShow
-      ? openEpisodes.length
-      : shows.length
-    : sortedChannels.length
+    activeGroup === '__favorites' ? 'Favorites' : isHistory ? 'History' : activeGroup ?? 'All channels'
 
   return (
     <div className="flex w-80 shrink-0 flex-col border-r border-zinc-800/70 bg-zinc-950/40">
       <div className="flex h-10 items-center justify-between border-b border-zinc-800/70 px-4 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-        <div className="flex min-w-0 items-center gap-1.5">
-          {openShow && (
-            <button
-              onClick={() => setOpenShowKey(null)}
-              className="-ml-1 grid h-5 w-5 shrink-0 place-items-center rounded text-zinc-400 hover:bg-zinc-800/70 hover:text-zinc-100"
-              aria-label="Back to shows"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-          )}
-          <span className="truncate">{label}</span>
-        </div>
+        <span className="truncate">{label}</span>
         <div className="flex items-center gap-2">
-          {isHistory && totalCount > 0 && <ClearHistoryButton />}
+          {isHistory && sortedChannels.length > 0 && <ClearHistoryButton />}
           {!isHistory && <SortMenu value={sort} onChange={setSort} />}
-          <span className="tabular-nums text-zinc-600">{totalCount.toLocaleString()}</span>
+          <span className="tabular-nums text-zinc-600">{sortedChannels.length.toLocaleString()}</span>
         </div>
       </div>
 
@@ -90,39 +57,8 @@ export function ChannelList() {
 
       {isHistory && channels.length > 0 ? (
         <HistoryList currentChannelId={current?.id ?? null} onPlay={play} />
-      ) : isSeries && !openShow && shows.length > 0 ? (
-        <ShowList
-          shows={shows}
-          currentChannelId={current?.id ?? null}
-          onOpen={(s) => {
-            // If a show has exactly one episode there's nothing to drill
-            // into — just play it straight from the roll-up.
-            if (!s.container && s.episodes.length === 1) play(s.episodes[0].channel)
-            else setOpenShowKey(s.key)
-          }}
-        />
-      ) : isSeries && openShow ? (
-        openShow.container && remote.loading && openEpisodes.length === 0 ? (
-          <ListSkeleton />
-        ) : openShow.container && remote.error && openEpisodes.length === 0 ? (
-          <div className="grid flex-1 place-items-center px-6 text-center text-sm text-zinc-500">
-            Couldn't load episodes.
-            <br />
-            <span className="text-xs text-zinc-600">{remote.error}</span>
-          </div>
-        ) : (
-          <EpisodeList
-            episodes={openEpisodes}
-            currentChannelId={current?.id ?? null}
-            onPlay={play}
-          />
-        )
       ) : (
-        <FlatList
-          channels={sortedChannels}
-          currentChannelId={current?.id ?? null}
-          onPlay={play}
-        />
+        <FlatList channels={sortedChannels} currentChannelId={current?.id ?? null} onPlay={play} />
       )}
     </div>
   )
@@ -137,50 +73,6 @@ function sortChannels(channels: Channel[], mode: SortMode): Channel[] {
     return [...channels].sort((a, b) => a.sortOrder - b.sortOrder)
   }
   return [...channels].sort((a, b) => a.name.localeCompare(b.name))
-}
-
-function sortShows(shows: Show[], mode: SortMode): Show[] {
-  if (mode === 'name') return [...shows].sort((a, b) => a.name.localeCompare(b.name))
-  // For "added" on shows, use the show row itself (provider series) or
-  // fall back to the earliest episode's sort order.
-  const order = (s: Show) =>
-    s.container?.sortOrder ?? Math.min(...s.episodes.map((e) => e.channel.sortOrder))
-  return [...shows].sort((a, b) => order(a) - order(b))
-}
-
-/**
- * Episodes of a provider-structured series, fetched when the show is
- * opened. Stale responses (the user opened another show meanwhile) are
- * dropped.
- */
-function useRemoteEpisodes(container: Channel | null) {
-  const [state, setState] = useState<{
-    forId: number | null
-    episodes: Episode[]
-    loading: boolean
-    error: string | null
-  }>({ forId: null, episodes: [], loading: false, error: null })
-  const id = container?.id ?? null
-
-  useEffect(() => {
-    if (id === null) return
-    let cancelled = false
-    setState({ forId: id, episodes: [], loading: true, error: null })
-    ipc
-      .listEpisodes(id)
-      .then((rows) => {
-        if (!cancelled) setState({ forId: id, episodes: rows.map(toEpisode), loading: false, error: null })
-      })
-      .catch((e) => {
-        if (!cancelled)
-          setState({ forId: id, episodes: [], loading: false, error: String(e).replace(/^Error:\s*/, '') })
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [id])
-
-  return state.forId === id ? state : { forId: id, episodes: [], loading: id !== null, error: null }
 }
 
 function SortMenu({ value, onChange }: { value: SortMode; onChange(m: SortMode): void }) {
@@ -263,7 +155,7 @@ function SortOption({
   )
 }
 
-// -------- flat list (live, movies, fallback) --------
+// -------- flat list --------
 
 function FlatList({
   channels,
@@ -312,196 +204,7 @@ function FlatList({
   )
 }
 
-// -------- show roll-up --------
-
-function ShowList({
-  shows,
-  currentChannelId,
-  onOpen,
-}: {
-  shows: Show[]
-  currentChannelId: number | null
-  onOpen(s: Show): void
-}) {
-  const parentRef = useRef<HTMLDivElement>(null)
-  const virt = useVirtualizer({
-    count: shows.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: 10,
-  })
-
-  return (
-    <div ref={parentRef} className="flex-1 overflow-y-auto">
-      <div style={{ height: virt.getTotalSize(), position: 'relative' }}>
-        {virt.getVirtualItems().map((row) => {
-          const s = shows[row.index]
-          const activeHere = s.episodes.some((e) => e.channel.id === currentChannelId)
-          return (
-            <div
-              key={row.key}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                height: ROW_HEIGHT,
-                transform: `translateY(${row.start}px)`,
-              }}
-            >
-              <ShowRow show={s} active={activeHere} onClick={() => onOpen(s)} />
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function ShowRow({ show, active, onClick }: { show: Show; active: boolean; onClick(): void }) {
-  const [logoOk, setLogoOk] = useState(true)
-  const epCount = show.episodes.length
-  const seasons = new Set(show.episodes.map((e) => e.season).filter((n) => n > 0))
-
-  return (
-    <div
-      role="button"
-      onClick={onClick}
-      className={cn(
-        'group flex h-full items-center gap-3 border-b border-zinc-900/60 px-3 transition-colors',
-        active ? 'bg-indigo-500/10 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60',
-      )}
-    >
-      <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-md bg-zinc-800 text-xs font-semibold text-zinc-500">
-        {show.logo && logoOk ? (
-          <img
-            src={show.logo}
-            alt=""
-            loading="lazy"
-            // VOD poster CDNs (TMDB mirrors, cached IMDB art) routinely
-            // 403 hotlink requests that carry a Referer header from an
-            // origin they don't whitelist. Dropping the header is the
-            // difference between every tile being broken and every tile
-            // loading.
-            referrerPolicy="no-referrer"
-            className="h-full w-full object-contain"
-            onError={() => setLogoOk(false)}
-          />
-        ) : (
-          show.name.slice(0, 2).toUpperCase()
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{show.name}</div>
-        <div className="truncate text-xs text-zinc-500">
-          {show.container
-            ? show.group ?? 'Series'
-            : epCount === 1
-              ? '1 episode'
-              : seasons.size > 1
-                ? `${seasons.size} seasons · ${epCount} episodes`
-                : `${epCount} episodes`}
-        </div>
-      </div>
-      <span className="shrink-0 text-zinc-600 group-hover:text-zinc-400">›</span>
-    </div>
-  )
-}
-
-// -------- episode drilldown --------
-
-function EpisodeList({
-  episodes,
-  currentChannelId,
-  onPlay,
-}: {
-  episodes: Episode[]
-  currentChannelId: number | null
-  onPlay(ch: Channel): void
-}) {
-  // Bucket episodes by season so users can orient themselves when a show
-  // spans many years.
-  const bySeason = useMemo(() => {
-    const map = new Map<number, Episode[]>()
-    for (const ep of episodes) {
-      const list = map.get(ep.season) ?? []
-      list.push(ep)
-      map.set(ep.season, list)
-    }
-    return Array.from(map.entries()).sort((a, b) => a[0] - b[0])
-  }, [episodes])
-
-  return (
-    <div className="flex-1 overflow-y-auto">
-      {bySeason.map(([season, eps]) => (
-        <div key={season}>
-          <div className="sticky top-0 z-10 border-b border-zinc-800/70 bg-zinc-950/90 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 backdrop-blur">
-            {season > 0 ? `Season ${season}` : 'Other'}
-          </div>
-          {eps.map((ep) => (
-            <EpisodeRow
-              key={ep.channel.id}
-              episode={ep}
-              active={currentChannelId === ep.channel.id}
-              onClick={() => onPlay(ep.channel)}
-            />
-          ))}
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function EpisodeRow({
-  episode,
-  active,
-  onClick,
-}: {
-  episode: Episode
-  active: boolean
-  onClick(): void
-}) {
-  const { season, episode: ep, subtitle, channel } = episode
-  const hasMarker = season > 0 || ep > 0
-  const marker = hasMarker ? `S${pad(season)}E${pad(ep)}` : ''
-  const title = subtitle ?? (hasMarker ? `Episode ${ep}` : channel.name)
-  const progress = useHistory((s) => s.progress.get(channel.id))
-
-  return (
-    <div
-      role="button"
-      onClick={onClick}
-      className={cn(
-        'relative flex h-[52px] items-center gap-3 border-b border-zinc-900/60 px-4 transition-colors',
-        active ? 'bg-indigo-500/10 text-zinc-100' : 'text-zinc-300 hover:bg-zinc-900/60',
-      )}
-    >
-      {marker && (
-        <span className="w-14 shrink-0 text-center text-[11px] font-semibold tabular-nums text-indigo-400/80">
-          {marker}
-        </span>
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm">{title}</span>
-          {progress?.finished && (
-            <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
-              Watched
-            </span>
-          )}
-        </div>
-      </div>
-      {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-indigo-400" />}
-      <ProgressStripe progress={progress} />
-    </div>
-  )
-}
-
-function pad(n: number): string {
-  return n.toString().padStart(2, '0')
-}
-
-// -------- individual channel row (live / movies) --------
+// -------- individual channel row --------
 
 function ChannelRow({
   channel,
@@ -586,7 +289,7 @@ function ChannelRow({
 /** Thin bar pinned to the bottom of a row, echoing the "keep watching"
  *  rails familiar from Netflix/Plex. We draw nothing for channels the
  *  user hasn't touched so the list stays quiet. */
-function ProgressStripe({ progress }: { progress: HistoryProgress | undefined }) {
+export function ProgressStripe({ progress }: { progress: HistoryProgress | undefined }) {
   if (!progress) return null
   if (progress.finished) {
     return (
@@ -780,7 +483,7 @@ function relativeTime(epochSeconds: number): string {
   return d.toLocaleDateString()
 }
 
-function ListSkeleton() {
+export function ListSkeleton() {
   return (
     <div className="flex flex-col gap-1 p-3">
       {Array.from({ length: 10 }).map((_, i) => (

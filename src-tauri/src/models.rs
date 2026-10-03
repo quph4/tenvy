@@ -57,6 +57,29 @@ pub struct Channel {
     pub episode: Option<i64>,
     /// Days of catch-up the provider keeps for this live channel.
     pub archive_days: Option<i64>,
+    /// Movies/series: rating out of 10, release year, when it was added.
+    pub rating: Option<f64>,
+    pub year: Option<i64>,
+    pub added: Option<i64>,
+}
+
+/// Everything the library's details page shows for a movie or series.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VodDetails {
+    pub plot: Option<String>,
+    pub genre: Option<String>,
+    pub cast: Option<String>,
+    pub director: Option<String>,
+    pub release_date: Option<String>,
+    /// Out of 10.
+    pub rating: Option<f64>,
+    /// "1h 52m" style, when the provider knows it.
+    pub duration: Option<String>,
+    pub poster: Option<String>,
+    pub backdrop: Option<String>,
+    /// Full YouTube URL.
+    pub trailer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
