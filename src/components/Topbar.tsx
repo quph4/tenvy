@@ -1,7 +1,8 @@
-import { ChevronDown, Search, Settings2, Tv2 } from 'lucide-react'
+import { ArrowDownToLine, ChevronDown, Loader2, Search, Settings2, Tv2 } from 'lucide-react'
 import { useUI } from '../stores/ui'
 import { usePlaylist } from '../stores/playlist'
 import { cn } from '../lib/cn'
+import { useUpdater } from '../stores/updater'
 
 export function Topbar() {
   const { openSearch, toggleSettings, setView, view } = useUI()
@@ -27,6 +28,7 @@ export function Topbar() {
       </button>
 
       <div className="ml-auto flex items-center gap-1">
+        <UpdatePill />
         <div className="flex h-8 overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/80 text-xs">
           <button
             onClick={() => setView('player')}
@@ -78,4 +80,31 @@ export function Topbar() {
       </div>
     </header>
   )
+}
+
+/** Shown only while an update is available or downloading. */
+function UpdatePill() {
+  const status = useUpdater((s) => s.status)
+  const install = useUpdater((s) => s.install)
+  if (status.kind === 'available') {
+    return (
+      <button
+        onClick={() => install()}
+        title={status.notes ?? undefined}
+        className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-indigo-500 px-3 text-xs font-semibold text-zinc-950 hover:bg-indigo-400"
+      >
+        <ArrowDownToLine className="h-3.5 w-3.5" />
+        Update to {status.version}
+      </button>
+    )
+  }
+  if (status.kind === 'downloading') {
+    return (
+      <span className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 px-3 text-xs text-zinc-400">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        Updating{status.progress != null ? ` ${Math.round(status.progress * 100)}%` : '…'}
+      </span>
+    )
+  }
+  return null
 }

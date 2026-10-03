@@ -1,0 +1,57 @@
+# Builds a signed Windows installer when a version tag is pushed and
+# publishes it as a draft GitHub release, with the latest.json the in-app
+# updater reads. Review the draft, then publish it to roll the update out.
+#
+# Required repository settings (see RELEASING.md):
+#   secrets.TAURI_SIGNING_PRIVATE_KEY           contents of lumen-updater.key
+#   secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (may be empty)
+#   vars.MPV_URL / vars.MPV_SHA256              pinned mpv 7z build to bundle
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Bundle mpv
+        shell: pwsh
+        run: ./scripts/fetch-mpv.ps1 -Url "${{ vars.MPV_URL }}" -Sha256 "${{ vars.MPV_SHA256 }}"
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Lumen ${{ github.ref_name }}'
+          releaseBody: 'See CHANGELOG.md for what changed.'
+          releaseDraft: true
+          includeUpdaterJson: true

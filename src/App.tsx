@@ -17,6 +17,7 @@ import { usePlayback } from './stores/playback'
 import { useUI } from './stores/ui'
 import { attachIngestListener } from './stores/ingest'
 import { attachGuideListener } from './stores/nowPlaying'
+import { startUpdateChecks } from './stores/updater'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
 
 function App() {
@@ -52,6 +53,8 @@ function App() {
     }
     return () => unlisteners.forEach((fn) => fn())
   }, [])
+
+  useEffect(() => startUpdateChecks(), [])
 
   useKeyboardShortcuts()
 

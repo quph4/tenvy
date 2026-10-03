@@ -4,6 +4,7 @@ import { usePlaylist } from '../../stores/playlist'
 import { useIngest } from '../../stores/ingest'
 import { ipc } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
+import { useUpdater } from '../../stores/updater'
 
 export function SettingsPanel() {
   const { settingsOpen, toggleSettings, openAddSource } = useUI()
@@ -42,7 +43,7 @@ export function SettingsPanel() {
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/50 animate-fade-in" onClick={toggleSettings}>
       <aside
-        className="h-full w-96 border-l border-zinc-800 bg-zinc-900 shadow-2xl"
+        className="flex h-full w-96 flex-col border-l border-zinc-800 bg-zinc-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
@@ -55,7 +56,7 @@ export function SettingsPanel() {
           </button>
         </div>
 
-        <div className="p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
               Playlists
@@ -105,7 +106,56 @@ export function SettingsPanel() {
             ))}
           </ul>
         </div>
+
+        <AboutSection />
       </aside>
+    </div>
+  )
+}
+
+function AboutSection() {
+  const status = useUpdater((s) => s.status)
+  const checkForUpdates = useUpdater((s) => s.checkForUpdates)
+  const install = useUpdater((s) => s.install)
+
+  const line =
+    status.kind === 'checking'
+      ? 'Checking for updates…'
+      : status.kind === 'none'
+        ? "You're on the latest version."
+        : status.kind === 'available'
+          ? `Version ${status.version} is available.`
+          : status.kind === 'downloading'
+            ? `Downloading ${status.version}…`
+            : status.kind === 'error'
+              ? `Couldn't check for updates: ${status.message}`
+              : null
+
+  return (
+    <div className="border-t border-zinc-800 p-5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">About</span>
+      <div className="mt-2 flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-sm text-zinc-200">Lumen {__APP_VERSION__}</div>
+          {line && <div className="mt-0.5 text-[11px] text-zinc-500">{line}</div>}
+        </div>
+        {status.kind === 'available' ? (
+          <button
+            onClick={() => install()}
+            className="inline-flex h-7 items-center rounded-md bg-indigo-500 px-2.5 text-xs font-semibold text-zinc-950 hover:bg-indigo-400"
+          >
+            Install
+          </button>
+        ) : (
+          <button
+            onClick={() => checkForUpdates(true)}
+            disabled={status.kind === 'checking' || status.kind === 'downloading'}
+            className="inline-flex h-7 items-center rounded-md border border-zinc-800 px-2.5 text-xs text-zinc-300 hover:border-zinc-700 disabled:opacity-50"
+          >
+            Check for updates
+          </button>
+        )}
+      </div>
     </div>
   )
 }
