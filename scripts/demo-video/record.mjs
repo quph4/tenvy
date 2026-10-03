@@ -5,6 +5,9 @@
 //   pnpm dev                       (in another terminal)
 //   node scripts/demo-video/record.mjs
 //   python scripts/demo-video/build.py --encode   -> out/tenvy-demo.mp4
+//
+// --vertical records without on-page captions for build_vertical.py,
+// which crops a square around the cursor and puts the captions above.
 import { spawn } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -16,6 +19,11 @@ rmSync(FRAMES, { recursive: true, force: true })
 mkdirSync(FRAMES, { recursive: true })
 
 const W = 1600, H = 900, SCALE = 1.2 // → 1920×1080
+const VERTICAL = process.argv.includes('--vertical')
+// What happened when (same clock as screencast frame timestamps), for the
+// vertical cut: cursor moves, captions, title/end cards.
+const events = []
+const mark = (e) => events.push({ t: Date.now() / 1000, ...e })
 const PORT = 9333
 const chrome = spawn('C:/Program Files/Google/Chrome/Application/chrome.exe', [
   '--headless=new', '--disable-gpu', '--hide-scrollbars', '--mute-audio',
@@ -69,6 +77,7 @@ await sleep(300)
 // ---- input helpers ----
 let cursor = { x: W * 0.62, y: H * 0.55 }
 async function moveTo(x, y, ms = 700) {
+  mark({ type: 'cursor', x, y, ms })
   await js(`__d.cursorTo(${x}, ${y}, ${ms})`)
   // Hover events along the way, so hover styles light up.
   const steps = 8
@@ -114,7 +123,10 @@ async function type(text, gap = 110) {
     await sleep(gap)
   }
 }
-const caption = (t) => js(`__d.caption(${JSON.stringify(t)})`)
+const caption = (t) => {
+  mark({ type: 'caption', text: t })
+  return VERTICAL ? Promise.resolve() : js(`__d.caption(${JSON.stringify(t)})`)
+}
 
 // ---- storyboard ----
 await js('__d.titleCard(true)')
@@ -136,6 +148,7 @@ await sleep(3200)
 await js(`(async () => { (await import('/src/stores/ui.ts')).useUI.getState().setView('epg') })()`)
 await sleep(400)
 await js('__d.titleCard(false)')
+mark({ type: 'card', on: false })
 await sleep(700)
 await caption('A real TV guide for your IPTV')
 await sleep(1600)
@@ -181,13 +194,15 @@ await click(`__d.byText('Season 2', 'button')`)
 await sleep(2200)
 
 // 6. End card
-await js('__d.caption(null)')
+await caption(null)
 await js('__d.endCard()')
+mark({ type: 'card', on: true })
 await sleep(3800)
 
 await send('Page.stopScreencast')
 await sleep(300)
 writeFileSync(join(OUT, 'frames.json'), JSON.stringify(frames))
+writeFileSync(join(OUT, 'events.json'), JSON.stringify(events))
 console.log(`${frames.length} frames over ${(frames.at(-1).t - frames[0].t).toFixed(1)}s`)
 ws.close()
 chrome.kill()

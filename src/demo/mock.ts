@@ -256,7 +256,7 @@ const progress = [
 ]
 const reminders: { channelId: number; start: number; stop: number; title: string }[] = []
 {
-  const next = guide('demo.7').find((p) => p.start > now + 1800)!
+  const next = guide('demo.7').find((p) => p.start > now + 4 * 3600)!
   reminders.push({ channelId: 7, start: next.start, stop: next.stop, title: next.title })
 }
 

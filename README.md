@@ -48,7 +48,8 @@ python scripts/demo-video/build.py --encode
 ```
 
 The storyboard is at the bottom of `record.mjs`; output lands in
-`scripts/demo-video/out/`.
+`scripts/demo-video/out/`. For a vertical 9:16 cut (social media), record
+with `--vertical` and run `build_vertical.py` instead.
 
 ## Test
 
