@@ -135,6 +135,10 @@ export interface MpvState {
   errorSeq: number
   /** mpv's reason for the latest failure, e.g. "loading failed". */
   lastError: string | null
+  /** The stream ran out; for live TV the connection dropped. */
+  eofReached: boolean
+  /** Waiting for the network to fill the cache. */
+  buffering: boolean
 }
 
 /** One row from the watch_history table, joined with its channel. */

@@ -3,6 +3,18 @@
 ## Unreleased
 
 ### Added
+- Automatic reconnect: when a stream drops, stalls or ends early, Tenvy
+  reopens it (films at the same spot) with growing pauses, and asks
+  after five tries in a row.
+- Picture & sound panel: picture shape (Auto, 16:9, 4:3, Fill, Stretch —
+  also the A key), audio and subtitle delay, speed for films, a sleep
+  timer (minutes or "when this programme ends") and stream details
+  (also the I key). Audio/subtitle tracks for live channels that have
+  several.
+- Your own lists: hide single channels, reorder favorites (⋯ menu or
+  right-click on a channel), channel numbers in the list. Provider
+  section titles like "-= Sweden =-" show as headings and don't count
+  as channels.
 - Rename a provider in Settings (click its name).
 - Home: continue watching, recently watched and favorite channels (with
   what's on), favorite films and series, and the newest movies and

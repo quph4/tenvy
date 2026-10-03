@@ -70,6 +70,11 @@ pub struct MpvState {
     pub error_seq: u64,
     /// mpv's `file_error` for the latest failure, e.g. "loading failed".
     pub last_error: Option<String>,
+    /// The stream ran out (keep-open holds the last frame). For live TV
+    /// that means the connection dropped.
+    pub eof_reached: bool,
+    /// Waiting for the network to fill the cache.
+    pub buffering: bool,
 }
 
 /// One track as reported by mpv's `track-list`. `id` is the `aid`/`sid`
@@ -221,6 +226,10 @@ impl Mpv {
             .arg("--cache=yes")
             .arg("--demuxer-max-bytes=150MiB")
             .arg("--demuxer-max-back-bytes=75MiB")
+            // Let FFmpeg reconnect a dropped HTTP connection by itself
+            // (resuming VOD with a Range request). Longer outages are
+            // handled by the app, which reopens the stream.
+            .arg("--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=4")
             // Most Xtream providers 403 mpv's default UA. Masquerade as a
             // recent Chrome — cheap, ubiquitous, and legitimate since the
             // user has a paid subscription.
@@ -309,6 +318,11 @@ impl Mpv {
             Ok(Err(_)) => Err(err!("mpv IPC reply channel dropped")),
             Err(_) => Err(err!("mpv IPC timeout on {}", name)),
         }
+    }
+
+    pub async fn get_property(&self, name: &str) -> Result<Value> {
+        let v = self.command(&[json!("get_property"), json!(name)]).await?;
+        Ok(v.get("data").cloned().unwrap_or(Value::Null))
     }
 
     pub async fn set_property(&self, name: &str, value: Value) -> Result<()> {
@@ -445,6 +459,7 @@ impl Mpv {
             "track-list",
             "core-idle",
             "eof-reached",
+            "paused-for-cache",
         ]
         .iter()
         .enumerate()
@@ -615,6 +630,8 @@ fn apply_property(s: &mut MpvState, name: &str, v: &Value) {
         "volume" => s.volume = v.as_f64(),
         "mute" => s.muted = v.as_bool().unwrap_or(false),
         "core-idle" => s.playing = !v.as_bool().unwrap_or(true),
+        "eof-reached" => s.eof_reached = v.as_bool().unwrap_or(false),
+        "paused-for-cache" => s.buffering = v.as_bool().unwrap_or(false),
         "track-list" => {
             if let Some(arr) = v.as_array() {
                 let mut audio = Vec::new();

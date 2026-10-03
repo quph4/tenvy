@@ -158,6 +158,16 @@ export const ipc = {
   async listFavorites(): Promise<Channel[]> {
     return invoke('list_favorites')
   },
+  /** Favorites in this order (the rest keep their place after). */
+  async reorderFavorites(ids: number[]): Promise<void> {
+    return invoke('reorder_favorites', { ids })
+  },
+  async setChannelHidden(channelId: number, hidden: boolean): Promise<void> {
+    return invoke('set_channel_hidden', { channelId, hidden })
+  },
+  async listHiddenChannels(): Promise<Channel[]> {
+    return invoke('list_hidden_channels')
+  },
   async toggleFavorite(channelId: number): Promise<boolean> {
     return invoke('toggle_favorite', { channelId })
   },
@@ -208,6 +218,14 @@ export const ipc = {
    *  `start`/`stop` are the programme's epoch seconds from the guide. */
   async mpvLoadCatchup(channelId: number, start: number, stop: number, prefs?: TrackPrefs): Promise<void> {
     return invoke('mpv_load_catchup', { channelId, start, stop, prefs: prefs ?? null })
+  },
+  /** Change a picture/sound setting (aspect, delays, speed); see mpv_adjust. */
+  async mpvAdjust(name: string, value: number | string | boolean): Promise<void> {
+    return invoke('mpv_adjust', { name, value })
+  },
+  /** Raw mpv properties describing the current stream. */
+  async mpvStreamInfo(): Promise<Record<string, unknown>> {
+    return invoke('mpv_stream_info')
   },
   /** Text drawn over the video by mpv — visible even in fullscreen. */
   async mpvShowText(text: string, durationMs = 4000): Promise<void> {

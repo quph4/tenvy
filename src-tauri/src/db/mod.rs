@@ -104,6 +104,9 @@ fn migrate(conn: &Connection) -> Result<()> {
              id       TEXT NOT NULL,
              PRIMARY KEY (name_key, id)
          ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS hidden_channels (
+             channel_id INTEGER PRIMARY KEY REFERENCES channels(id) ON DELETE CASCADE
+         );
          CREATE TABLE IF NOT EXISTS group_prefs (
              source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
              kind      TEXT    NOT NULL,
@@ -117,6 +120,16 @@ fn migrate(conn: &Connection) -> Result<()> {
              value TEXT NOT NULL
          ) WITHOUT ROWID;",
     )?;
+
+    // Favorites in the viewer's own order; existing ones keep newest-first.
+    if !column_exists(conn, "favorites", "position")? {
+        conn.execute_batch(
+            "ALTER TABLE favorites ADD COLUMN position INTEGER;
+             UPDATE favorites SET position = (
+                 SELECT COUNT(*) FROM favorites f2 WHERE f2.added_at > favorites.added_at
+                    OR (f2.added_at = favorites.added_at AND f2.channel_id < favorites.channel_id));",
+        )?;
+    }
 
     // One-off data migrations, tracked with SQLite's user_version.
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
@@ -147,6 +160,9 @@ const CHANNEL_COLS: &str = "c.id, c.source_id, \
 /// SQL condition (on a channel aliased `c`) that leaves out rows in
 /// categories the viewer hid (`skip_hidden`) or locked (while locked).
 /// None when nothing needs leaving out.
+/// Leaves out channels the viewer hid one by one (appended to a WHERE).
+const HIDDEN_CHANNEL_FILTER: &str = " AND c.id NOT IN (SELECT channel_id FROM hidden_channels)";
+
 fn visibility_clause(skip_hidden: bool, unlocked: bool) -> Option<String> {
     let cond = match (skip_hidden, unlocked) {
         (false, true) => return None,
@@ -664,6 +680,7 @@ pub fn list_channels(
         sql.push_str(" AND ");
         sql.push_str(&clause);
     }
+    sql.push_str(HIDDEN_CHANNEL_FILTER);
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(sid) = source_id {
         sql.push_str(" AND c.source_id = ?");
@@ -723,6 +740,7 @@ pub fn search_channels(
         sql.push_str(" AND ");
         sql.push_str(&clause);
     }
+    sql.push_str(HIDDEN_CHANNEL_FILTER);
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("%{}%", escaped))];
     if let Some(sid) = source_id {
         sql.push_str(" AND c.source_id = ?");
@@ -750,7 +768,7 @@ pub fn recently_added(db: &Db, kind: &str, limit: i64, unlocked: bool) -> Result
     let filter = visibility_clause(true, unlocked).map(|c| format!("AND {c}")).unwrap_or_default();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS} FROM channels c
-          WHERE c.parent_id IS NULL AND c.kind = ?1 AND c.added IS NOT NULL {filter}
+          WHERE c.parent_id IS NULL AND c.kind = ?1 AND c.added IS NOT NULL {filter} {HIDDEN_CHANNEL_FILTER}
           ORDER BY c.added DESC LIMIT ?2"
     ))?;
     let rows = stmt
@@ -783,7 +801,7 @@ pub fn list_favorites(db: &Db, unlocked: bool) -> Result<Vec<Channel>> {
         "SELECT {CHANNEL_COLS}
            FROM favorites f JOIN channels c ON c.id = f.channel_id
            {filter}
-           ORDER BY f.added_at DESC"
+           ORDER BY f.position, f.added_at DESC"
     ))?;
     let rows = stmt
         .query_map([], row_to_channel)?
@@ -805,12 +823,47 @@ pub fn toggle_favorite(db: &Db, channel_id: i64) -> Result<bool> {
         conn.execute("DELETE FROM favorites WHERE channel_id = ?1", [channel_id])?;
         Ok(false)
     } else {
+        // New favorites go to the end of the viewer's order.
         conn.execute(
-            "INSERT INTO favorites(channel_id, added_at) VALUES (?1, strftime('%s','now'))",
+            "INSERT INTO favorites(channel_id, added_at, position)
+             VALUES (?1, strftime('%s','now'), (SELECT COALESCE(MAX(position), -1) + 1 FROM favorites))",
             [channel_id],
         )?;
         Ok(true)
     }
+}
+
+/// Put favorites in this order (ids not listed keep their place after).
+pub fn reorder_favorites(db: &Db, ids: &[i64]) -> Result<()> {
+    let mut conn = db.write();
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE favorites SET position = position + ?1", [ids.len() as i64])?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute("UPDATE favorites SET position = ?2 WHERE channel_id = ?1", params![id, i as i64])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+// ---------- hidden channels ----------
+
+pub fn set_channel_hidden(db: &Db, channel_id: i64, hidden: bool) -> Result<()> {
+    let conn = db.write();
+    if hidden {
+        conn.execute("INSERT OR IGNORE INTO hidden_channels (channel_id) VALUES (?1)", [channel_id])?;
+    } else {
+        conn.execute("DELETE FROM hidden_channels WHERE channel_id = ?1", [channel_id])?;
+    }
+    Ok(())
+}
+
+pub fn list_hidden_channels(db: &Db) -> Result<Vec<Channel>> {
+    let conn = db.read();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHANNEL_COLS} FROM hidden_channels h JOIN channels c ON c.id = h.channel_id ORDER BY c.kind, c.name"
+    ))?;
+    let rows = stmt.query_map([], row_to_channel)?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 // ---------- watch history ----------
@@ -1344,5 +1397,30 @@ mod tests {
         let sid = insert_source(&db, &SourceKind::M3u, "test", "http://x", None, None).unwrap();
         rename_source(&db, sid, "Living room").unwrap();
         assert_eq!(get_source(&db, sid).unwrap().unwrap().name, "Living room");
+    }
+
+    #[test]
+    fn hidden_channels_and_favorite_order() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("A", "http://h/a.ts"), ch("B", "http://h/b.ts"), ch("C", "http://h/c.ts")]).unwrap();
+        let all = list_channels(&db, Some(sid), None, None, true).unwrap();
+        let (a, b, c) = (all[0].id, all[1].id, all[2].id);
+
+        set_channel_hidden(&db, b, true).unwrap();
+        let names = |v: Vec<Channel>| v.into_iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names(list_channels(&db, Some(sid), None, None, true).unwrap()), ["A", "C"]);
+        assert_eq!(names(list_channels(&db, Some(sid), Some("G"), None, true).unwrap()), ["A", "C"]);
+        assert!(search_channels(&db, "b", Some(sid), None, true).unwrap().is_empty());
+        assert_eq!(names(list_hidden_channels(&db).unwrap()), ["B"]);
+        set_channel_hidden(&db, b, false).unwrap();
+        assert_eq!(list_channels(&db, Some(sid), None, None, true).unwrap().len(), 3);
+
+        for id in [a, b, c] {
+            toggle_favorite(&db, id).unwrap();
+        }
+        assert_eq!(names(list_favorites(&db, true).unwrap()), ["A", "B", "C"]);
+        reorder_favorites(&db, &[c, a]).unwrap();
+        assert_eq!(names(list_favorites(&db, true).unwrap()), ["C", "A", "B"]);
     }
 }

@@ -102,6 +102,9 @@ pub fn run() {
             commands::account_info,
             commands::list_favorites,
             commands::toggle_favorite,
+            commands::reorder_favorites,
+            commands::set_channel_hidden,
+            commands::list_hidden_channels,
             commands::programmes_for_channels,
             commands::now_playing,
             commands::open_external,
@@ -127,6 +130,8 @@ pub fn run() {
             commands::mpv_state::mpv_set_geometry,
             commands::mpv_state::mpv_stop,
             commands::mpv_state::mpv_show_text,
+            commands::mpv_state::mpv_adjust,
+            commands::mpv_state::mpv_stream_info,
             commands::mpv_state::mpv_get_state,
         ])
         .run(tauri::generate_context!())

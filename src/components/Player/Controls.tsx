@@ -12,6 +12,7 @@ import {
   Radio,
   Volume2,
   VolumeX,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { useState } from 'react'
 import { usePlayback } from '../../stores/playback'
@@ -23,7 +24,7 @@ import { openInExternalPlayer } from '../../lib/externalPlayer'
 import { displayTitle } from '../../lib/titles'
 import { usePlaylist } from '../../stores/playlist'
 
-export type PickerKind = 'audio' | 'subtitle' | null
+export type PickerKind = 'audio' | 'subtitle' | 'picture' | null
 
 /**
  * Docked control strip shown under the video surface.
@@ -52,6 +53,8 @@ export function Controls({
     fullscreen,
     channel,
     currentSubtitle,
+    audioTracks,
+    subtitleTracks,
     timePos,
     duration,
     catchup,
@@ -151,7 +154,7 @@ export function Controls({
             </div>
           )}
 
-          {isVod && (
+          {(isVod || audioTracks.length > 1 || subtitleTracks.length > 0) && (
             <>
               <button
                 onClick={() => onTogglePicker(activePicker === 'audio' ? null : 'audio')}
@@ -182,6 +185,17 @@ export function Controls({
             </>
           )}
 
+          <button
+            onClick={() => onTogglePicker(activePicker === 'picture' ? null : 'picture')}
+            className={cn(
+              'grid h-8 w-8 place-items-center rounded-full text-white/90 hover:bg-white/10',
+              activePicker === 'picture' && 'bg-white/10',
+            )}
+            aria-label="Picture and sound"
+            title="Picture & sound"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </button>
           <button
             onClick={openExternal}
             className="grid h-8 w-8 place-items-center rounded-full text-white/90 hover:bg-white/10"

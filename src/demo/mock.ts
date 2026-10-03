@@ -248,7 +248,8 @@ function guide(tvgId: string): Programme[] {
 
 // ---------- state the app writes ----------
 
-const favorites = new Set([1, 7, 11, 102])
+let favorites = new Set([1, 7, 11, 102])
+const hiddenChannels = new Set<number>()
 const progress = [
   { channelId: 102, timePos: 2900, duration: 6400, watchedAt: now - 3600, finished: false },
   { channelId: 108, timePos: 1200, duration: 7100, watchedAt: now - 86_400, finished: false },
@@ -267,8 +268,8 @@ let sourceName = 'My provider'
 type Args = Record<string, any>
 
 function listChannels({ group, kind }: Args): Channel[] {
-  if (group === '__favorites') return channels.filter((c) => favorites.has(c.id) && visible(c, false))
-  return channels.filter((c) => (!kind || c.kind === kind) && (!group || c.group === group) && visible(c, !group))
+  if (group === '__favorites') return [...favorites].map((id) => byId.get(id)!).filter((c) => visible(c, false))
+  return channels.filter((c) => (!kind || c.kind === kind) && (!group || c.group === group) && visible(c, !group) && !hiddenChannels.has(c.id))
 }
 
 // Category prefs as the app sets them: "kind/name" → flags.
@@ -330,7 +331,18 @@ function handle(cmd: string, a: Args = {}): unknown {
       return (a.tvgIds as string[]).flatMap((id) => guide(id).filter((p) => p.start <= t && p.stop > t))
     }
     case 'list_favorites':
-      return channels.filter((c) => favorites.has(c.id))
+      return [...favorites].map((id) => byId.get(id)!)
+    case 'reorder_favorites': {
+      const ids = a.ids as number[]
+      favorites = new Set([...ids.filter((id) => favorites.has(id)), ...[...favorites].filter((id) => !ids.includes(id))])
+      return null
+    }
+    case 'set_channel_hidden':
+      if (a.hidden) hiddenChannels.add(a.channelId)
+      else hiddenChannels.delete(a.channelId)
+      return null
+    case 'list_hidden_channels':
+      return [...hiddenChannels].map((id) => byId.get(id)!)
     case 'toggle_favorite':
       if (favorites.has(a.channelId)) favorites.delete(a.channelId)
       else favorites.add(a.channelId)
@@ -412,6 +424,8 @@ function handle(cmd: string, a: Args = {}): unknown {
         currentSubtitle: null,
         errorSeq: 0,
         lastError: null,
+        eofReached: false,
+        buffering: false,
       }
     case 'plugin:notification|is_permission_granted':
       return true

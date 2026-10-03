@@ -682,6 +682,24 @@ pub async fn toggle_favorite(state: State<'_, AppState>, channel_id: i64) -> Res
     tokio::task::spawn_blocking(move || db::toggle_favorite(&db, channel_id)).await?
 }
 
+#[tauri::command]
+pub async fn reorder_favorites(state: State<'_, AppState>, ids: Vec<i64>) -> Result<()> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::reorder_favorites(&db, &ids)).await?
+}
+
+#[tauri::command]
+pub async fn set_channel_hidden(state: State<'_, AppState>, channel_id: i64, hidden: bool) -> Result<()> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::set_channel_hidden(&db, channel_id, hidden)).await?
+}
+
+#[tauri::command]
+pub async fn list_hidden_channels(state: State<'_, AppState>) -> Result<Vec<Channel>> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::list_hidden_channels(&db)).await?
+}
+
 // ---------- watch history ----------
 
 #[tauri::command]

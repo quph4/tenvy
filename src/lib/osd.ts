@@ -1,8 +1,9 @@
 import { ipc } from './ipc'
 import { hhmm } from './time'
 import type { Channel } from '../types'
+export { liveChannels, channelNumber } from './channels'
 import { usePlayback } from '../stores/playback'
-import { usePlaylist } from '../stores/playlist'
+import { channelNumber } from './channels'
 import { useToast } from '../stores/toast'
 
 /**
@@ -12,17 +13,6 @@ import { useToast } from '../stores/toast'
  */
 export function osd(text: string, durationMs = 4000) {
   ipc.mpvShowText(text, durationMs).catch(() => {})
-}
-
-/** The live channels on screen, in order — what channel numbers count. */
-export function liveChannels(): Channel[] {
-  return usePlaylist.getState().channels.filter((c) => c.kind === 'live')
-}
-
-/** 1-based position in the live list, or null when it isn't listed. */
-export function channelNumber(ch: Channel): number | null {
-  const i = liveChannels().findIndex((c) => c.id === ch.id)
-  return i === -1 ? null : i + 1
 }
 
 /** TV-style banner after switching channel: number, name, now and next. */

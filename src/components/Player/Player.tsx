@@ -5,6 +5,8 @@ import type { Channel } from '../../types'
 import { usePlayback } from '../../stores/playback'
 import { Controls, type PickerKind } from './Controls'
 import { TrackPanel, formatTrack, type TrackOption } from './TrackPanel'
+import { PicturePanel } from './PicturePanel'
+import { applyAspect, savedAspect } from '../../lib/picture'
 import type { Programme } from '../../types'
 import { ipc, onMpvEvent, onMpvState, subscribe } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
@@ -13,11 +15,17 @@ import { END_GUARD, useHistory } from '../../stores/history'
 import { useShallow } from 'zustand/react/shallow'
 import { useVideoObscured } from '../../hooks/useVideoObscured'
 import { rememberLastChannel, useTvPrefs } from '../../stores/tvPrefs'
-import { showChannelInfo } from '../../lib/osd'
+import { osd, showChannelInfo } from '../../lib/osd'
 
 const DRAWER_WIDTH = 288 // px — tailwind w-72
 /** Wait before retrying a stream that failed to open. */
 const RETRY_DELAY_MS = 2000
+/** No progress this long while playing means the stream stalled. */
+const STALL_MS = 15_000
+/** Waits before each reconnect in a row; then we give up and ask. */
+const BACKOFF_MS = [1000, 3000, 6000, 10_000, 15_000]
+/** Trouble-free playback this long resets the reconnect count. */
+const STABLE_MS = 60_000
 /** A live channel on screen this long counts as watched. */
 const LIVE_WATCHED_MS = 10_000
 
@@ -51,6 +59,8 @@ function openCurrent(push: (kind: 'error' | 'info', message: string) => void, re
     // previous one was paused should still start playing.
     .then(() => ipc.mpvSetPause(false))
     .then(() => {
+      const aspect = savedAspect()
+      if (aspect !== 'auto') applyAspect(aspect)
       if (channel.kind !== 'live' || catchup || resume) return
       rememberLastChannel(channel)
       showChannelInfo(channel).catch(() => {})
@@ -68,6 +78,141 @@ function openCurrent(push: (kind: 'error' | 'info', message: string) => void, re
       // channel and sees nothing happen, which is the worst kind of bug.
       push('error', `Playback failed: ${String(e).replace(/^Error:\s*/, '')}`)
     })
+}
+
+/**
+ * Keeps the stream going. A pick that fails to open gets one retry, then
+ * an explanation. Once something has played, a dropped connection (the
+ * stream ends early, errors, or stops moving for STALL_MS) is reopened
+ * with growing pauses — at the same position for films — and after
+ * BACKOFF_MS.length tries in a row we stop and offer "Try again".
+ */
+function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push']) {
+  useEffect(() => {
+    let nonce = -1
+    let played = false // this pick has shown progress at least once
+    let openRetried = false
+    let attempts = 0
+    let gaveUp = false
+    let recovering = false // a reconnect is under way or awaiting progress
+    let lastPos: number | null = null
+    let lastProgress = Date.now()
+    let lastReconnect = 0
+    let timer: number | undefined
+
+    const reset = (n: number) => {
+      window.clearTimeout(timer)
+      timer = undefined
+      nonce = n
+      played = openRetried = gaveUp = recovering = false
+      attempts = 0
+      lastPos = null
+      lastProgress = Date.now()
+    }
+
+    const reopenAfter = (ms: number) => {
+      const n = nonce
+      lastProgress = Date.now() + ms
+      timer = window.setTimeout(() => {
+        timer = undefined
+        if (usePlayback.getState().playNonce !== n) return
+        lastProgress = Date.now()
+        openCurrent(push, true)
+      }, ms)
+    }
+
+    const reconnect = () => {
+      const ch = usePlayback.getState().channel
+      if (!ch || timer !== undefined) return
+      if (attempts >= BACKOFF_MS.length) {
+        gaveUp = true
+        osd(`Lost the connection to ${ch.name}`, 5000)
+        push('error', `Lost the connection to ${ch.name}. Check your internet, or try again in a moment.`, {
+          action: {
+            label: 'Try again',
+            run: () => {
+              attempts = 0
+              gaveUp = false
+              lastProgress = Date.now()
+              openCurrent(push, true)
+            },
+          },
+        })
+        return
+      }
+      const wait = BACKOFF_MS[attempts++]
+      lastReconnect = Date.now()
+      recovering = true
+      osd(attempts === 1 ? 'Connection lost — reconnecting…' : `Reconnecting… (attempt ${attempts})`, wait + 4000)
+      reopenAfter(wait)
+    }
+
+    const failedToOpen = () => {
+      const s = usePlayback.getState()
+      if (!s.channel || timer !== undefined) return
+      if (played) return reconnect()
+      if (!openRetried) {
+        openRetried = true
+        return reopenAfter(RETRY_DELAY_MS)
+      }
+      if (s.catchup) {
+        // Seen in practice: channels flagged as archived whose recordings
+        // the panel answers with an empty page.
+        push('error', `Your provider has no recording of "${s.catchup.title}" on ${s.channel.name}.`)
+      } else {
+        push(
+          'error',
+          `Couldn't open ${s.channel.name}${s.lastError ? ` (${s.lastError})` : ''}. ` +
+            'If your provider allows one connection at a time, close any other player using it.',
+        )
+      }
+    }
+
+    const tick = () => {
+      const pb = usePlayback.getState()
+      if (pb.playNonce !== nonce) reset(pb.playNonce)
+      if (!pb.channel || pb.pendingResume || gaveUp) return
+      const now = Date.now()
+
+      if (pb.timePos != null && pb.timePos !== lastPos) {
+        if (lastPos != null) {
+          if (recovering) osd('Reconnected', 1500)
+          recovering = false
+          played = true
+          if (attempts > 0 && now - lastReconnect > STABLE_MS) attempts = 0
+        }
+        lastPos = pb.timePos
+        lastProgress = now
+      }
+      if (timer !== undefined) return
+
+      if (pb.eofReached) {
+        const film = pb.channel.kind !== 'live' || pb.catchup
+        const atEnd = film && pb.duration != null && pb.timePos != null && pb.timePos >= pb.duration - END_GUARD
+        if (played && !atEnd) reconnect()
+        return
+      }
+      if (!pb.playing) {
+        // Paused on purpose: nothing to watch for.
+        lastProgress = now
+        return
+      }
+      if (now - lastProgress > STALL_MS) {
+        if (played) reconnect()
+        else failedToOpen()
+      }
+    }
+
+    const interval = window.setInterval(tick, 1000)
+    const unsubscribe = usePlayback.subscribe((s, prev) => {
+      if (s.errorSeq !== prev.errorSeq && s.channel) failedToOpen()
+    })
+    return () => {
+      window.clearInterval(interval)
+      window.clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [push])
 }
 
 /**
@@ -157,34 +302,7 @@ export function Player() {
     openCurrent(push, false)
   }, [channelId, playNonce, catchup, push])
 
-  // A stream that fails to open (provider still holding the previous
-  // connection, a hiccup) gets one automatic retry after a pause; a second
-  // failure for the same pick is reported.
-  const retriedNonce = useRef<number | null>(null)
-  useEffect(
-    () =>
-      usePlayback.subscribe((s, prev) => {
-        if (s.errorSeq === prev.errorSeq || !s.channel) return
-        const nonce = s.playNonce
-        if (retriedNonce.current !== nonce) {
-          retriedNonce.current = nonce
-          window.setTimeout(() => {
-            if (usePlayback.getState().playNonce === nonce) openCurrent(push, true)
-          }, RETRY_DELAY_MS)
-        } else if (s.catchup) {
-          // Seen in practice: channels flagged as archived whose recordings
-          // the panel answers with an empty page.
-          push('error', `Your provider has no recording of "${s.catchup.title}" on ${s.channel.name}.`)
-        } else {
-          push(
-            'error',
-            `Couldn't open ${s.channel.name}${s.lastError ? ` (${s.lastError})` : ''}. ` +
-              'If your provider allows one connection at a time, close any other player using it.',
-          )
-        }
-      }),
-    [push],
-  )
+  useConnectionKeeper(push)
 
   // 3) Mirror UI intent → mpv for volume/mute. Play/pause is *not* an
   //    effect: the store mirrors mpv's pause flag back into `playing`, and
@@ -405,6 +523,7 @@ export function Player() {
                     onClose={() => setActivePicker(null)}
                   />
                 )}
+                {activePicker === 'picture' && <PicturePanel onClose={() => setActivePicker(null)} />}
                 {activePicker === 'subtitle' && (
                   <TrackPanel
                     label="Subtitles"

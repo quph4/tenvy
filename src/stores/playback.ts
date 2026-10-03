@@ -46,6 +46,9 @@ interface PlaybackState {
   /** Mirrors mpv: bumps on every failed open; see MpvState.errorSeq. */
   errorSeq: number
   lastError: string | null
+  /** Mirrors mpv: the stream ran out / is waiting for data. */
+  eofReached: boolean
+  buffering: boolean
 
   // ---- external-launch prefs ----
   preferredAudioTrack: number | null
@@ -116,6 +119,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   currentSubtitle: null,
   errorSeq: 0,
   lastError: null,
+  eofReached: false,
+  buffering: false,
 
   preferredAudioTrack: null,
   preferredSubtitleTrack: null,
@@ -246,6 +251,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       currentSubtitle: s.currentSubtitle,
       errorSeq: s.errorSeq,
       lastError: s.lastError,
+      eofReached: s.eofReached,
+      buffering: s.buffering,
       // Reflect mpv's real pause flag so the button stays honest. Only the
       // flag — mpv is briefly `idle` while a new file loads, and treating
       // that as "not playing" used to flip the UI (and mpv) to paused. We

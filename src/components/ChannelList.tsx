@@ -1,8 +1,10 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDownAZ, ArrowDownWideNarrow, History, Star } from 'lucide-react'
+import { ArrowDownAZ, ArrowDownWideNarrow, History, MoreVertical, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayback } from '../stores/playback'
-import { usePlaylist, HISTORY_GROUP } from '../stores/playlist'
+import { usePlaylist, HISTORY_GROUP, FAVORITES_GROUP } from '../stores/playlist'
+import { isSeparator, separatorTitle, sortChannels, SORT_KEY, type SortMode } from '../lib/channels'
+import { useChannelMenu } from './ChannelMenu'
 import { useHistory, isResumable, fmtResume } from '../stores/history'
 import { ipc } from '../lib/ipc'
 import { useToast } from '../stores/toast'
@@ -13,13 +15,8 @@ import type { Channel, HistoryProgress } from '../types'
 import { Trash2 } from 'lucide-react'
 
 const ROW_HEIGHT = 56
-
-/**
- * How to order channels in the list. "added" is insertion order from the
- * playlist — effectively date-added, since refresh replaces channels with
- * increasing sort_order. "name" is a simple locale compare.
- */
-type SortMode = 'added' | 'name'
+/** Section titles from the provider ("-= Sweden =-") are slimmer. */
+const SEPARATOR_HEIGHT = 30
 
 /**
  * The live-TV channel list. Movies and series are browsed in the library
@@ -30,9 +27,12 @@ export function ChannelList() {
   const current = usePlayback((s) => s.channel)
   const play = usePlayback((s) => s.requestPlay)
   const isHistory = activeGroup === HISTORY_GROUP
-  const [sort, setSort] = usePref<SortMode>('tenvy.channels.sort', 'added')
+  const [sort, setSort] = usePref<SortMode>(SORT_KEY, 'added')
+  const isFavorites = activeGroup === FAVORITES_GROUP
 
-  const sortedChannels = useMemo(() => sortChannels(channels, sort), [channels, sort])
+  // Favorites keep the viewer's own order (reordered from the ⋯ menu).
+  const sortedChannels = useMemo(() => sortChannels(channels, sort, isFavorites), [channels, sort, isFavorites])
+  const playable = useMemo(() => sortedChannels.filter((c) => !isSeparator(c)), [sortedChannels])
 
   const label =
     activeGroup === '__favorites' ? 'Favorites' : isHistory ? 'History' : activeGroup ?? 'All channels'
@@ -43,8 +43,8 @@ export function ChannelList() {
         <span className="truncate">{label}</span>
         <div className="flex items-center gap-2">
           {isHistory && sortedChannels.length > 0 && <ClearHistoryButton />}
-          {!isHistory && <SortMenu value={sort} onChange={setSort} />}
-          <span className="tabular-nums text-neutral-600">{sortedChannels.length.toLocaleString()}</span>
+          {!isHistory && !isFavorites && <SortMenu value={sort} onChange={setSort} />}
+          <span className="tabular-nums text-neutral-600">{playable.length.toLocaleString()}</span>
         </div>
       </div>
 
@@ -65,15 +65,6 @@ export function ChannelList() {
 }
 
 // -------- sort helpers --------
-
-function sortChannels(channels: Channel[], mode: SortMode): Channel[] {
-  if (mode === 'added') {
-    // Already in insertion order from the query, but re-sort to be safe —
-    // favorites come out in toggle order, which isn't playlist order.
-    return [...channels].sort((a, b) => a.sortOrder - b.sortOrder)
-  }
-  return [...channels].sort((a, b) => a.name.localeCompare(b.name))
-}
 
 function SortMenu({ value, onChange }: { value: SortMode; onChange(m: SortMode): void }) {
   const [open, setOpen] = useState(false)
@@ -167,10 +158,18 @@ function FlatList({
   onPlay(ch: Channel): void
 }) {
   const parentRef = useRef<HTMLDivElement>(null)
+  // Channel numbers as ↑/↓ and the digit keys see them: section titles
+  // don't count.
+  const numbers = useMemo(() => {
+    const m = new Map<number, number>()
+    let n = 0
+    for (const c of channels) if (!isSeparator(c)) m.set(c.id, ++n)
+    return m
+  }, [channels])
   const virt = useVirtualizer({
     count: channels.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: (i) => (isSeparator(channels[i]) ? SEPARATOR_HEIGHT : ROW_HEIGHT),
     overscan: 10,
   })
 
@@ -179,6 +178,7 @@ function FlatList({
       <div style={{ height: virt.getTotalSize(), position: 'relative' }}>
         {virt.getVirtualItems().map((row) => {
           const ch = channels[row.index]
+          const separator = isSeparator(ch)
           return (
             <div
               key={row.key}
@@ -187,15 +187,22 @@ function FlatList({
                 top: 0,
                 left: 0,
                 right: 0,
-                height: ROW_HEIGHT,
+                height: separator ? SEPARATOR_HEIGHT : ROW_HEIGHT,
                 transform: `translateY(${row.start}px)`,
               }}
             >
-              <ChannelRow
-                channel={ch}
-                active={currentChannelId === ch.id}
-                onClick={() => onPlay(ch)}
-              />
+              {separator ? (
+                <div className="flex h-full items-end border-b border-neutral-800/70 px-4 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-accent-400/80">
+                  {separatorTitle(ch.name)}
+                </div>
+              ) : (
+                <ChannelRow
+                  channel={ch}
+                  number={numbers.get(ch.id) ?? null}
+                  active={currentChannelId === ch.id}
+                  onClick={() => onPlay(ch)}
+                />
+              )}
             </div>
           )
         })}
@@ -208,10 +215,12 @@ function FlatList({
 
 function ChannelRow({
   channel,
+  number,
   active,
   onClick,
 }: {
   channel: Channel
+  number?: number | null
   active: boolean
   onClick(): void
 }) {
@@ -234,6 +243,10 @@ function ChannelRow({
     <div
       role="button"
       onClick={onClick}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        useChannelMenu.getState().show(channel, e.clientX, e.clientY)
+      }}
       className={cn(
         'group flex h-full items-center gap-3 border-b border-neutral-900/60 px-3 transition-colors',
         active ? 'bg-accent-500/10 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900/60',
@@ -259,6 +272,7 @@ function ChannelRow({
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
+          {number != null && <span className="shrink-0 text-[11px] tabular-nums text-neutral-600">{number}</span>}
           <span className="truncate text-sm font-medium">{channel.name}</span>
           {channel.archiveDays ? (
             <span title={`Catch-up: ${channel.archiveDays} day(s)`} className="shrink-0 text-amber-400/70">
@@ -278,6 +292,18 @@ function ChannelRow({
         aria-label="Toggle favorite"
       >
         <Star className="h-4 w-4" />
+      </button>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          const r = e.currentTarget.getBoundingClientRect()
+          useChannelMenu.getState().show(channel, r.left, r.bottom + 4)
+        }}
+        className="-ml-2 grid h-7 w-6 shrink-0 place-items-center rounded text-neutral-600 opacity-0 transition-all hover:text-neutral-200 group-hover:opacity-100"
+        aria-label="More"
+        title="More"
+      >
+        <MoreVertical className="h-4 w-4" />
       </button>
       <ProgressStripe progress={progress} />
     </div>

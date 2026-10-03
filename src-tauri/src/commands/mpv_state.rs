@@ -63,6 +63,10 @@ impl TrackPrefs {
         let mut o = vec![
             "aid=auto".to_string(),
             if self.subs_off { "sid=no" } else { "sid=auto" }.to_string(),
+            // Sync fixes and speed belong to one stream, not the next.
+            "audio-delay=0".to_string(),
+            "sub-delay=0".to_string(),
+            "speed=1".to_string(),
         ];
         if let Some(l) = self.audio_lang.as_deref().and_then(clean_lang) {
             o.push(format!("alang={l}"));
@@ -275,6 +279,76 @@ pub async fn mpv_set_geometry(
     { let _ = (app, holder, x, y, w, h); Err(err!("windows only")) }
 }
 
+/// Picture and sound settings the UI may change. Anything else is refused,
+/// so the webview can't reconfigure mpv (paths, scripts, network).
+const ADJUSTABLE: &[&str] = &[
+    "video-aspect-override",
+    "panscan",
+    "keepaspect",
+    "video-zoom",
+    "audio-delay",
+    "sub-delay",
+    "speed",
+];
+
+#[tauri::command]
+pub async fn mpv_adjust(holder: State<'_, MpvHolder>, name: String, value: serde_json::Value) -> Result<()> {
+    if !ADJUSTABLE.contains(&name.as_str()) {
+        return Err(err!("{name} can't be changed"));
+    }
+    if !(value.is_number() || value.is_string() || value.is_boolean()) {
+        return Err(err!("bad value for {name}"));
+    }
+    #[cfg(windows)]
+    {
+        let mpv = holder.inner.lock().await.as_ref().and_then(|h| h.mpv.clone());
+        match mpv {
+            Some(mpv) if mpv.is_alive() => mpv.set_property(&name, value).await,
+            _ => Ok(()),
+        }
+    }
+    #[cfg(not(windows))]
+    { let _ = (holder, value); Err(err!("windows only")) }
+}
+
+/// Technical details of what's playing, for the info overlay.
+#[tauri::command]
+pub async fn mpv_stream_info(holder: State<'_, MpvHolder>) -> Result<serde_json::Map<String, serde_json::Value>> {
+    #[cfg(windows)]
+    {
+        let mut out = serde_json::Map::new();
+        let mpv = holder.inner.lock().await.as_ref().and_then(|h| h.mpv.clone());
+        let Some(mpv) = mpv.filter(|m| m.is_alive()) else { return Ok(out) };
+        for name in [
+            "video-params",
+            "video-format",
+            "video-codec",
+            "audio-codec-name",
+            "audio-params",
+            "container-fps",
+            "estimated-vf-fps",
+            "video-bitrate",
+            "audio-bitrate",
+            "hwdec-current",
+            "file-format",
+            "demuxer-cache-duration",
+            "video-aspect-override",
+            "panscan",
+            "keepaspect",
+            "audio-delay",
+            "sub-delay",
+            "speed",
+        ] {
+            if let Ok(v) = mpv.get_property(name).await {
+                out.insert(name.to_string(), v);
+            }
+        }
+        Ok(out)
+    }
+    #[cfg(not(windows))]
+    { let _ = holder; Err(err!("windows only")) }
+}
+
 /// Text over the video (channel info, reminders in fullscreen). Does
 /// nothing when mpv isn't running — no point starting it for a message.
 #[tauri::command]
@@ -338,6 +412,8 @@ pub struct StateSnapshot {
     pub current_subtitle: Option<i64>,
     pub error_seq: u64,
     pub last_error: Option<String>,
+    pub eof_reached: bool,
+    pub buffering: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -379,6 +455,8 @@ impl From<crate::mpv::MpvState> for StateSnapshot {
             current_audio: s.current_audio,
             current_subtitle: s.current_subtitle,
             error_seq: s.error_seq,
+            eof_reached: s.eof_reached,
+            buffering: s.buffering,
             last_error: s.last_error,
         }
     }
@@ -507,16 +585,20 @@ mod tests {
 
     #[test]
     fn track_prefs_become_file_options() {
-        assert_eq!(TrackPrefs::default().file_options(), ["aid=auto", "sid=auto"]);
+        const RESET: [&str; 3] = ["audio-delay=0", "sub-delay=0", "speed=1"];
+        fn with(head: &[&'static str], tail: &[&'static str]) -> Vec<&'static str> {
+            [head, &RESET[..], tail].concat()
+        }
+        assert_eq!(TrackPrefs::default().file_options(), with(&["aid=auto", "sid=auto"], &[]));
         let p = TrackPrefs { audio_lang: Some("swe".into()), sub_lang: Some("en".into()), subs_off: false };
-        assert_eq!(p.file_options(), ["aid=auto", "sid=auto", "alang=swe", "slang=en"]);
+        assert_eq!(p.file_options(), with(&["aid=auto", "sid=auto"], &["alang=swe", "slang=en"]));
         let p = TrackPrefs { sub_lang: Some("en".into()), subs_off: true, ..Default::default() };
-        assert_eq!(p.file_options(), ["aid=auto", "sid=no"]);
+        assert_eq!(p.file_options(), with(&["aid=auto", "sid=no"], &[]));
     }
 
     #[test]
     fn odd_language_tags_are_ignored() {
         let p = TrackPrefs { audio_lang: Some("sv,sid=1".into()), sub_lang: Some(" ".into()), subs_off: false };
-        assert_eq!(p.file_options(), ["aid=auto", "sid=auto"]);
+        assert_eq!(p.file_options().len(), 5);
     }
 }

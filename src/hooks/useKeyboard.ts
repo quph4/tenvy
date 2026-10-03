@@ -6,6 +6,7 @@ import { useToast } from '../stores/toast'
 import { ipc } from '../lib/ipc'
 import { openInExternalPlayer } from '../lib/externalPlayer'
 import { liveChannels, osd } from '../lib/osd'
+import { cycleAspect, showStreamInfo } from '../lib/picture'
 
 /** Wait this long after the last digit before switching channel. */
 const DIGIT_WAIT_MS = 1500
@@ -26,6 +27,8 @@ const DIGIT_WAIT_MS = 1500
  *   0–9      go to channel number (live, player view)
  *   Backspace  back to the previous channel
  *   Enter    in fullscreen: the action of the latest notice ("Watch now")
+ *   A        picture shape (auto, 16:9, 4:3, fill, stretch)
+ *   I        stream info on screen
  *   ← / →    volume down/up
  *
  * State is read with `getState()` at key time rather than subscribed to:
@@ -103,6 +106,16 @@ export function useKeyboardShortcuts() {
           toasts.dismiss(t.id)
           break
         }
+        case 'a':
+          if (!channel) return
+          e.preventDefault()
+          cycleAspect()
+          break
+        case 'i':
+          if (!channel) return
+          e.preventDefault()
+          showStreamInfo().catch(() => {})
+          break
         case 'backspace': {
           const prev = pb.previous
           if (!prev || channel?.kind !== 'live' || ui.view !== 'player') return
@@ -175,7 +188,7 @@ export function useKeyboardShortcuts() {
           if (!channel || channel.kind !== 'live' || ui.view !== 'player') return
           // Zap through the live channels on screen; if the playing channel
           // isn't among them (another tab or group is open), do nothing.
-          const channels = usePlaylist.getState().channels.filter((c) => c.kind === 'live')
+          const channels = liveChannels()
           const i = channels.findIndex((c) => c.id === channel.id)
           if (i === -1) return
           e.preventDefault()

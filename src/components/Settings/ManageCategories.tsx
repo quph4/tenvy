@@ -6,7 +6,7 @@ import { useParental } from '../../stores/parental'
 import { usePlaylist } from '../../stores/playlist'
 import { useToast } from '../../stores/toast'
 import { useUI } from '../../stores/ui'
-import type { ChannelKind, Group } from '../../types'
+import type { Channel, ChannelKind, Group } from '../../types'
 import { PinSetup } from './ParentalSection'
 
 const KINDS: { kind: ChannelKind; label: string }[] = [
@@ -32,6 +32,7 @@ function Dialog() {
   const { sources, activeSourceId, activeKind } = usePlaylist()
   const push = useToast((s) => s.push)
   const [kind, setKind] = useState<ChannelKind>(activeKind)
+  const [showHidden, setShowHidden] = useState(false)
   const [groups, setGroups] = useState<Group[]>([])
   const [filter, setFilter] = useState('')
   const [needPin, setNeedPin] = useState<string[] | null>(null)
@@ -112,13 +113,24 @@ function Dialog() {
                 {KINDS.map((k) => (
                   <button
                     key={k.kind}
-                    onClick={() => setKind(k.kind)}
-                    className={cn('flex-1 rounded-md py-1.5 font-medium', kind === k.kind ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300')}
+                    onClick={() => {
+                      setKind(k.kind)
+                      setShowHidden(false)
+                    }}
+                    className={cn('flex-1 rounded-md py-1.5 font-medium', kind === k.kind && !showHidden ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300')}
                   >
                     {k.label}
                   </button>
                 ))}
+                <button
+                  onClick={() => setShowHidden(true)}
+                  className={cn('flex-1 rounded-md py-1.5 font-medium', showHidden ? 'bg-neutral-800 text-white' : 'text-neutral-500 hover:text-neutral-300')}
+                >
+                  Hidden channels
+                </button>
               </div>
+              {showHidden && <HiddenChannels />}
+              {!showHidden && <>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
                 <input
@@ -152,9 +164,10 @@ function Dialog() {
               <p className="text-[11px] text-neutral-500">
                 {groups.length} categories · {hiddenCount} hidden. Hidden ones stay out of "All" and search; locked ones need the PIN.
               </p>
+              </>}
             </div>
 
-            <ul className="min-h-0 flex-1 overflow-y-auto p-2">
+            {!showHidden && <ul className="min-h-0 flex-1 overflow-y-auto p-2">
               {shown.map((g) => (
                 <li key={g.name} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-neutral-800/40">
                   <span className={cn('min-w-0 flex-1 truncate', g.hidden ? 'text-neutral-600 line-through decoration-neutral-700' : 'text-neutral-200')}>
@@ -179,11 +192,44 @@ function Dialog() {
                 </li>
               ))}
               {shown.length === 0 && <li className="px-2 py-6 text-center text-xs text-neutral-600">No categories match.</li>}
-            </ul>
+            </ul>}
           </>
         )}
       </div>
     </div>
+  )
+}
+
+/** Channels hidden one by one (from a row's ⋯ menu), to bring back. */
+function HiddenChannels() {
+  const [list, setList] = useState<Channel[] | null>(null)
+  const load = () => ipc.listHiddenChannels().then(setList).catch(() => setList([]))
+  useEffect(() => {
+    load()
+  }, [])
+  const unhide = async (c: Channel) => {
+    await ipc.setChannelHidden(c.id, false).catch(() => {})
+    await load()
+    usePlaylist.getState().refreshChannels().catch(() => {})
+  }
+  if (!list) return null
+  return (
+    <ul className="max-h-[50vh] overflow-y-auto">
+      {list.length === 0 && (
+        <li className="px-2 py-6 text-center text-xs text-neutral-600">
+          No hidden channels. Hide one with the ⋯ button (or right-click) on a channel.
+        </li>
+      )}
+      {list.map((c) => (
+        <li key={c.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-neutral-800/40">
+          <span className="min-w-0 flex-1 truncate text-neutral-300">{c.name}</span>
+          <span className="shrink-0 truncate text-[11px] text-neutral-600">{c.group}</span>
+          <button onClick={() => unhide(c)} className="shrink-0 rounded-md border border-neutral-800 px-2 py-0.5 text-xs text-neutral-300 hover:border-neutral-700">
+            Show
+          </button>
+        </li>
+      ))}
+    </ul>
   )
 }
 

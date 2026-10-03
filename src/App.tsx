@@ -12,6 +12,7 @@ import { Toasts } from './components/Toasts'
 import { FirstRun } from './components/FirstRun'
 import { Home } from './components/Home/Home'
 import { PinPrompt } from './components/PinPrompt'
+import { ChannelMenu } from './components/ChannelMenu'
 import { ManageCategories } from './components/Settings/ManageCategories'
 import { useAccounts } from './stores/accounts'
 import { useParental } from './stores/parental'
@@ -160,6 +161,7 @@ function App() {
       <AddSource />
       <ManageCategories />
       <PinPrompt />
+      <ChannelMenu />
       <Toasts />
       <IngestOverlay />
       <ResumePrompt />
