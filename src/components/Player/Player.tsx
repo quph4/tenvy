@@ -94,7 +94,7 @@ export function Player() {
   const streamUrl = channel?.streamUrl ?? null
   const isVod = channel?.kind === 'movie' || channel?.kind === 'series'
   useEffect(() => {
-    if (!streamUrl) {
+    if (channelId === undefined) {
       ipc.mpvStop().catch(() => {})
       // Also park the native child off-screen. Sending w=0/h=0 makes the
       // Rust side SW_HIDE the HWND so it doesn't linger over UI when the
@@ -109,7 +109,7 @@ export function Player() {
     const start = usePlayback.getState().pendingStart
     usePlayback.getState().consumePendingStart()
     ipc
-      .mpvLoad(streamUrl, start)
+      .mpvLoad(channelId, start)
       // mpv's pause flag survives loadfile — a new channel picked while
       // the previous one was paused should still start playing.
       .then(() => ipc.mpvSetPause(false))
@@ -258,7 +258,7 @@ export function Player() {
         push('info', 'The player stopped unexpectedly — restarting…')
         const isVodNow = channel.kind === 'movie' || channel.kind === 'series'
         ipc
-          .mpvLoad(channel.streamUrl, isVodNow ? timePos : null)
+          .mpvLoad(channel.id, isVodNow ? timePos : null)
           .catch((e) => push('error', `Playback failed: ${String(e).replace(/^Error:\s*/, '')}`))
       }
     })

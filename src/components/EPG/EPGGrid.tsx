@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { listen } from '@tauri-apps/api/event'
 import { usePlaylist } from '../../stores/playlist'
 import { usePlayback } from '../../stores/playback'
 import { ipc } from '../../lib/ipc'
@@ -25,8 +26,13 @@ export function EPGGrid() {
     setView('player')
   }
 
-  const nowEpoch = Math.floor(Date.now() / 1000)
-  const windowStart = useMemo(() => floorToMinutes(nowEpoch - HISTORY_HOURS * HOUR, 30), [nowEpoch])
+  // Ticks once a minute so the "now" line and highlighting move.
+  const [nowEpoch, setNowEpoch] = useState(() => Math.floor(Date.now() / 1000))
+  useEffect(() => {
+    const t = window.setInterval(() => setNowEpoch(Math.floor(Date.now() / 1000)), 60_000)
+    return () => window.clearInterval(t)
+  }, [])
+  const windowStart = floorToMinutes(nowEpoch - HISTORY_HOURS * HOUR, 30)
   const windowEnd = windowStart + WINDOW_HOURS * HOUR
   const pxPerSec = PIXELS_PER_HOUR / HOUR
   const totalWidth = (windowEnd - windowStart) * pxPerSec
@@ -40,6 +46,19 @@ export function EPGGrid() {
   })
 
   const [programmes, setProgrammes] = useState<Map<string, Programme[]>>(new Map())
+
+  // Cached rows are only valid for one window and one version of the
+  // guide: drop them when the window slides or a new guide lands.
+  useEffect(() => {
+    setProgrammes(new Map())
+  }, [windowStart])
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    listen('guide-updated', () => setProgrammes(new Map()))
+      .then((fn) => (unlisten = fn))
+      .catch(() => {})
+    return () => unlisten?.()
+  }, [])
 
   // Load programmes for the visible rows
   useEffect(() => {
@@ -73,7 +92,9 @@ export function EPGGrid() {
     return () => {
       cancelled = true
     }
-  }, [rowVirtualizer.getVirtualItems().map((v) => v.index).join(','), channels, windowStart, windowEnd])
+  // `programmes` is a dependency so a reset (new guide, new window) refetches
+  // the rows on screen; the `missing` filter keeps it from looping.
+  }, [rowVirtualizer.getVirtualItems().map((v) => v.index).join(','), channels, windowStart, windowEnd, programmes])
 
   // Scroll so "now" is roughly one-third in
   useEffect(() => {

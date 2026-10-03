@@ -79,7 +79,7 @@ export function useKeyboardShortcuts() {
           const subtitleTrack = pb.currentSubtitle ?? pb.preferredSubtitleTrack
           const { push } = useToast.getState()
           ipc
-            .openExternal(channel.streamUrl, { audioTrack, subtitleTrack })
+            .openExternal(channel.id, { audioTrack, subtitleTrack })
             .then((p) => push('success', `Launched ${p.split(/[\\/]/).pop() ?? p}`))
             .catch((err) => push('error', String(err)))
           break

@@ -143,7 +143,12 @@ async fn ingest_m3u(app: &AppHandle, state: &State<'_, AppState>, source: &Sourc
     let sid = source.id;
     tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, &channels)).await??;
 
-    // `#EXTM3U url-tvg="…"` names the playlist's own guide.
+    // `#EXTM3U url-tvg="…"` names the playlist's own guide. Failing that,
+    // an Xtream `get.php` playlist has the panel's guide at `xmltv.php`.
+    let guide_url = guide_url.or_else(|| {
+        let (host, user, pass) = xtream::credentials_from_m3u_url(&source.url)?;
+        Xtream::new(&host, &user, &pass, state.http.clone()).ok().map(|x| x.xmltv_url())
+    });
     if let Some(url) = guide_url {
         refresh_guide_in_background(app.clone(), state.db.clone(), state.http.clone(), url, sid);
     }
@@ -181,11 +186,10 @@ async fn ingest_xmltv(
 ) -> Result<()> {
     let bytes = fetch_bytes(&state.http, &source.url).await?;
     emit_progress(app, source.id, "parsing", 0);
-    let programmes = tokio::task::spawn_blocking(move || xmltv::parse(&bytes)).await??;
-    let count = programmes.len() as i64;
-    emit_progress(app, source.id, "storing", count);
+    let guide = tokio::task::spawn_blocking(move || xmltv::parse(&bytes)).await??;
+    emit_progress(app, source.id, "storing", guide.programmes.len() as i64);
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || db::upsert_programmes(&db, &programmes)).await??;
+    tokio::task::spawn_blocking(move || db::upsert_guide(&db, &guide)).await??;
     Ok(())
 }
 
@@ -196,8 +200,8 @@ fn refresh_guide_in_background(app: AppHandle, db: Db, http: reqwest::Client, ur
     tokio::spawn(async move {
         let result: Result<usize> = async {
             let bytes = fetch_bytes(&http, &url).await?;
-            let programmes = tokio::task::spawn_blocking(move || xmltv::parse(&bytes)).await??;
-            tokio::task::spawn_blocking(move || db::upsert_programmes(&db, &programmes)).await?
+            let guide = tokio::task::spawn_blocking(move || xmltv::parse(&bytes)).await??;
+            tokio::task::spawn_blocking(move || db::upsert_guide(&db, &guide)).await?
         }
         .await;
         match result {
@@ -414,13 +418,14 @@ pub async fn programmes_for_channels(
         .await?
 }
 
+/// What's on now for a batch of guide ids — one call per screen of rows.
 #[tauri::command]
-pub async fn current_programme(
+pub async fn now_playing(
     state: State<'_, AppState>,
-    tvg_id: String,
-) -> Result<Option<Programme>> {
+    tvg_ids: Vec<String>,
+) -> Result<Vec<Programme>> {
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || db::current_programme(&db, &tvg_id)).await?
+    tokio::task::spawn_blocking(move || db::now_playing(&db, &tvg_ids)).await?
 }
 
 // ---------- external player ----------
@@ -432,16 +437,31 @@ pub async fn current_programme(
 /// back to the user.
 #[tauri::command]
 pub async fn open_external(
-    url: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+    channel_id: i64,
     audio_track: Option<i64>,
     subtitle_track: Option<i64>,
 ) -> Result<String> {
+    use tauri::Manager;
+    let db = state.db.clone();
+    let playback = tokio::task::spawn_blocking(move || db::get_playback(&db, channel_id))
+        .await??
+        .ok_or_else(|| err!("Channel not found"))?;
+    let url = playback.stream_url;
     // The URL comes from a provider's playlist. Validation guarantees it's
     // a network URL (so it can't be read as a `--option`), and mpv also
     // gets an explicit `--` before it.
     crate::sources::stream_url::validate(&url)?;
+    // Prefer the mpv we ship; it opens in its own window just fine.
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|d| d.join("mpv").join("mpv.exe"))
+        .filter(|p| p.is_file());
     tokio::task::spawn_blocking(move || -> Result<String> {
-        let (player, is_mpv) = match crate::players::find_system_mpv() {
+        let (player, is_mpv) = match bundled.or_else(crate::players::find_system_mpv) {
             Some(p) => (p, true),
             None => (
                 crate::players::find_vlc().ok_or_else(|| {
@@ -463,8 +483,20 @@ pub async fn open_external(
                 // user chose "Off" in Lumen.
                 None => cmd.arg("--sid=no"),
             };
+            if let Some(ua) = &playback.user_agent {
+                cmd.arg(format!("--user-agent={}", ua));
+            }
+            if let Some(r) = &playback.referrer {
+                cmd.arg(format!("--referrer={}", r));
+            }
             cmd.arg("--");
         } else {
+            if let Some(ua) = &playback.user_agent {
+                cmd.arg(format!("--http-user-agent={}", ua));
+            }
+            if let Some(r) = &playback.referrer {
+                cmd.arg(format!("--http-referrer={}", r));
+            }
             // VLC's track flags are 0-based indexes within the type.
             if let Some(a) = audio_track {
                 cmd.arg(format!("--audio-track={}", a - 1));

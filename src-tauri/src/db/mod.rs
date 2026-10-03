@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -9,18 +10,46 @@ use crate::models::{Channel, Group, HistoryEntry, HistoryProgress, Programme, So
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 
-/// Shared connection handle. Rusqlite's Connection is not Sync, so we wrap in a
-/// std::sync::Mutex and always do DB work on a blocking thread.
-pub type Db = Arc<Mutex<Connection>>;
+/// Shared database handle: one connection for writes and one for reads.
+///
+/// Rusqlite's Connection is not Sync, so each sits behind a std Mutex and
+/// all DB work happens on blocking threads. In WAL mode readers never wait
+/// for a writer, so splitting them keeps the UI's queries (channel lists,
+/// now-playing lookups) responsive while a large guide import holds the
+/// write connection for several seconds.
+#[derive(Clone)]
+pub struct Db {
+    write: Arc<Mutex<Connection>>,
+    read: Arc<Mutex<Connection>>,
+}
+
+impl Db {
+    fn write(&self) -> MutexGuard<'_, Connection> {
+        self.write.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn read(&self) -> MutexGuard<'_, Connection> {
+        self.read.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
 
 pub fn open(path: &Path) -> Result<Db> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(path)?;
-    conn.execute_batch(SCHEMA_SQL)?;
-    migrate(&conn)?;
-    Ok(Arc::new(Mutex::new(conn)))
+    let write = Connection::open(path)?;
+    write.busy_timeout(Duration::from_secs(10))?;
+    write.execute_batch(SCHEMA_SQL)?;
+    migrate(&write)?;
+
+    let read = Connection::open(path)?;
+    read.busy_timeout(Duration::from_secs(10))?;
+    read.execute_batch("PRAGMA query_only = ON; PRAGMA temp_store = MEMORY;")?;
+
+    Ok(Db {
+        write: Arc::new(Mutex::new(write)),
+        read: Arc::new(Mutex::new(read)),
+    })
 }
 
 /// Lightweight column-level migrations. SQLite has no `ADD COLUMN IF NOT
@@ -39,6 +68,11 @@ fn migrate(conn: &Connection) -> Result<()> {
         ("parent_id", "ALTER TABLE channels ADD COLUMN parent_id INTEGER REFERENCES channels(id) ON DELETE CASCADE"),
         ("season", "ALTER TABLE channels ADD COLUMN season INTEGER"),
         ("episode", "ALTER TABLE channels ADD COLUMN episode INTEGER"),
+        // Guide matching by name (see xmltv::channel_name_key).
+        ("name_key", "ALTER TABLE channels ADD COLUMN name_key TEXT"),
+        // Per-stream HTTP headers from #EXTVLCOPT or `url|User-Agent=…`.
+        ("user_agent", "ALTER TABLE channels ADD COLUMN user_agent TEXT"),
+        ("referrer", "ALTER TABLE channels ADD COLUMN referrer TEXT"),
     ] {
         if !column_exists(conn, "channels", col)? {
             conn.execute(ddl, [])?;
@@ -47,13 +81,37 @@ fn migrate(conn: &Connection) -> Result<()> {
     // Always create the indexes — safe on both fresh and migrated DBs.
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_channels_kind ON channels(source_id, kind, group_name);
-         CREATE INDEX IF NOT EXISTS idx_channels_parent ON channels(parent_id);",
+         CREATE INDEX IF NOT EXISTS idx_channels_parent ON channels(parent_id);
+         CREATE TABLE IF NOT EXISTS epg_channels (
+             name_key TEXT NOT NULL,
+             id       TEXT NOT NULL,
+             PRIMARY KEY (name_key, id)
+         ) WITHOUT ROWID;",
     )?;
+
+    // One-off data migrations, tracked with SQLite's user_version.
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version < 1 {
+        // Guide ids became case-insensitive (stored lowercase).
+        conn.execute_batch(
+            "BEGIN;
+             UPDATE channels SET tvg_id = lower(tvg_id) WHERE tvg_id IS NOT NULL;
+             UPDATE OR REPLACE programmes SET channel_tvg_id = lower(channel_tvg_id);
+             PRAGMA user_version = 1;
+             COMMIT;",
+        )?;
+    }
     Ok(())
 }
 
 /// Column list for `row_to_channel`, against a table aliased `c`.
-const CHANNEL_COLS: &str = "c.id, c.source_id, c.tvg_id, c.name, c.logo, c.group_name, c.stream_url, \
+///
+/// `tvg_id` is the channel's guide id: its own, or — when the playlist
+/// didn't give one — the id of a guide channel with the same normalised
+/// name.
+const CHANNEL_COLS: &str = "c.id, c.source_id, \
+     COALESCE(c.tvg_id, (SELECT e.id FROM epg_channels e WHERE e.name_key = c.name_key LIMIT 1)) AS tvg_id, \
+     c.name, c.logo, c.group_name, c.stream_url, \
      c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode";
 
 fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
@@ -96,7 +154,7 @@ fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<Channel> {
 // ---------- sources ----------
 
 pub fn list_sources(db: &Db) -> Result<Vec<Source>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let mut stmt = conn.prepare("SELECT id, kind, name, url, updated_at FROM sources ORDER BY id")?;
     let rows = stmt
         .query_map([], row_to_source)?
@@ -105,7 +163,7 @@ pub fn list_sources(db: &Db) -> Result<Vec<Source>> {
 }
 
 pub fn get_source(db: &Db, id: i64) -> Result<Option<Source>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let row = conn
         .query_row(
             "SELECT id, kind, name, url, updated_at FROM sources WHERE id = ?1",
@@ -117,7 +175,7 @@ pub fn get_source(db: &Db, id: i64) -> Result<Option<Source>> {
 }
 
 pub fn get_source_credentials(db: &Db, id: i64) -> Result<(Source, Option<String>, Option<String>)> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let row = conn.query_row(
         "SELECT id, kind, name, url, updated_at, username, password FROM sources WHERE id = ?1",
         [id],
@@ -146,7 +204,7 @@ pub fn insert_source(
     username: Option<&str>,
     password: Option<&str>,
 ) -> Result<i64> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     conn.execute(
         "INSERT INTO sources(kind, name, url, username, password, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, strftime('%s','now'))",
@@ -156,13 +214,13 @@ pub fn insert_source(
 }
 
 pub fn delete_source(db: &Db, id: i64) -> Result<()> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     conn.execute("DELETE FROM sources WHERE id = ?1", [id])?;
     Ok(())
 }
 
 pub fn touch_source(db: &Db, id: i64) -> Result<()> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     conn.execute(
         "UPDATE sources SET updated_at = strftime('%s','now') WHERE id = ?1",
         [id],
@@ -180,7 +238,7 @@ pub fn touch_source(db: &Db, id: i64) -> Result<()> {
 /// longer in the playlist are deleted. Episode rows (`parent_id` set) are
 /// left alone; they belong to their show and go when it goes.
 pub fn replace_channels(db: &Db, source_id: i64, channels: &[ChannelInsert]) -> Result<usize> {
-    let mut conn = db.lock().unwrap();
+    let mut conn = db.write();
     let tx = conn.transaction()?;
     sync_rows(&tx, source_id, None, None, channels)?;
     tx.commit()?;
@@ -191,7 +249,7 @@ pub fn replace_channels(db: &Db, source_id: i64, channels: &[ChannelInsert]) -> 
 /// rules as `replace_channels`). Returns the stored episodes in order.
 pub fn replace_episodes(db: &Db, parent_id: i64, episodes: &[ChannelInsert]) -> Result<Vec<Channel>> {
     {
-        let mut conn = db.lock().unwrap();
+        let mut conn = db.write();
         let tx = conn.transaction()?;
         let (source_id, group): (i64, Option<String>) = tx.query_row(
             "SELECT source_id, group_name FROM channels WHERE id = ?1",
@@ -205,7 +263,7 @@ pub fn replace_episodes(db: &Db, parent_id: i64, episodes: &[ChannelInsert]) -> 
 }
 
 pub fn list_episodes(db: &Db, parent_id: i64) -> Result<Vec<Channel>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS} FROM channels c WHERE c.parent_id = ?1 ORDER BY c.sort_order"
     ))?;
@@ -245,30 +303,39 @@ fn sync_rows(
         let mut update = tx.prepare(
             "UPDATE channels
                 SET tvg_id = ?2, name = ?3, logo = ?4, group_name = ?5, stream_url = ?6,
-                    sort_order = ?7, kind = ?8, container = ?9, season = ?10, episode = ?11
+                    sort_order = ?7, kind = ?8, container = ?9, season = ?10, episode = ?11,
+                    name_key = ?12, user_agent = ?13, referrer = ?14
               WHERE id = ?1",
         )?;
         let mut insert = tx.prepare(
             "INSERT INTO channels(source_id, parent_id, tvg_id, name, logo, group_name, stream_url,
-                                  sort_order, kind, container, season, episode)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                                  sort_order, kind, container, season, episode,
+                                  name_key, user_agent, referrer)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         )?;
         for (i, c) in items.iter().enumerate() {
             let group = group.or(c.group.as_deref());
+            // Guide ids are matched case-insensitively; see xmltv::parse.
+            let tvg_id = c.tvg_id.as_deref().map(str::to_lowercase);
+            // Only live channels have guide data worth matching by name.
+            let name_key = (c.kind == "live" && tvg_id.is_none())
+                .then(|| crate::sources::xmltv::channel_name_key(&c.name))
+                .filter(|k| !k.is_empty());
             let reuse = existing
                 .get_mut(&channel_key(&c.stream_url))
                 .and_then(|ids| ids.pop_front());
             match reuse {
                 Some(id) => {
                     update.execute(params![
-                        id, c.tvg_id, c.name, c.logo, group, c.stream_url, i as i64, c.kind,
-                        c.container, c.season, c.episode,
+                        id, tvg_id, c.name, c.logo, group, c.stream_url, i as i64, c.kind,
+                        c.container, c.season, c.episode, name_key, c.user_agent, c.referrer,
                     ])?;
                 }
                 None => {
                     insert.execute(params![
-                        source_id, parent_id, c.tvg_id, c.name, c.logo, group, c.stream_url,
-                        i as i64, c.kind, c.container, c.season, c.episode,
+                        source_id, parent_id, tvg_id, c.name, c.logo, group, c.stream_url,
+                        i as i64, c.kind, c.container, c.season, c.episode, name_key,
+                        c.user_agent, c.referrer,
                     ])?;
                 }
             }
@@ -305,6 +372,34 @@ pub struct ChannelInsert {
     pub container: bool,
     pub season: Option<i64>,
     pub episode: Option<i64>,
+    /// HTTP headers the provider requires for this stream.
+    pub user_agent: Option<String>,
+    pub referrer: Option<String>,
+}
+
+/// What the player needs to open a channel.
+pub struct Playback {
+    pub stream_url: String,
+    pub user_agent: Option<String>,
+    pub referrer: Option<String>,
+}
+
+pub fn get_playback(db: &Db, channel_id: i64) -> Result<Option<Playback>> {
+    let conn = db.read();
+    let row = conn
+        .query_row(
+            "SELECT stream_url, user_agent, referrer FROM channels WHERE id = ?1",
+            [channel_id],
+            |r| {
+                Ok(Playback {
+                    stream_url: r.get(0)?,
+                    user_agent: r.get(1)?,
+                    referrer: r.get(2)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(row)
 }
 
 pub fn list_groups(
@@ -312,7 +407,7 @@ pub fn list_groups(
     source_id: Option<i64>,
     kind: Option<&str>,
 ) -> Result<Vec<Group>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     // ORDER BY MIN(sort_order): the earliest channel in each group wins,
     // which means groups come out in the order the provider shipped them
     // (an M3U's `group-title=` sequence, or an Xtream `get_categories`
@@ -356,7 +451,7 @@ pub fn list_channels(
     group: Option<&str>,
     kind: Option<&str>,
 ) -> Result<Vec<Channel>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let mut sql = format!("SELECT {CHANNEL_COLS} FROM channels c WHERE c.parent_id IS NULL");
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(sid) = source_id {
@@ -386,7 +481,7 @@ pub fn list_channels(
 }
 
 pub fn get_channel(db: &Db, id: i64) -> Result<Option<Channel>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let row = conn
         .query_row(
             &format!("SELECT {CHANNEL_COLS} FROM channels c WHERE c.id = ?1"),
@@ -405,7 +500,7 @@ pub fn search_channels(
     source_id: Option<i64>,
     kind: Option<&str>,
 ) -> Result<Vec<Channel>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     // Escape LIKE wildcards so a search for "100%" means the literal text.
     let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
     let mut sql = format!(
@@ -436,7 +531,7 @@ pub fn search_channels(
 // ---------- favorites ----------
 
 pub fn list_favorites(db: &Db) -> Result<Vec<Channel>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS}
            FROM favorites f JOIN channels c ON c.id = f.channel_id
@@ -449,7 +544,7 @@ pub fn list_favorites(db: &Db) -> Result<Vec<Channel>> {
 }
 
 pub fn toggle_favorite(db: &Db, channel_id: i64) -> Result<bool> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     let exists: bool = conn
         .query_row(
             "SELECT 1 FROM favorites WHERE channel_id = ?1",
@@ -485,7 +580,7 @@ pub fn upsert_watch_progress(
     duration: f64,
     finished: bool,
 ) -> Result<()> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     conn.execute(
         "INSERT INTO watch_history(channel_id, time_pos, duration, watched_at, finished)
          VALUES (?1, ?2, ?3, strftime('%s','now'), ?4)
@@ -500,7 +595,7 @@ pub fn upsert_watch_progress(
 }
 
 pub fn list_watch_history(db: &Db) -> Result<Vec<HistoryEntry>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS}, h.time_pos, h.duration, h.watched_at, h.finished
            FROM watch_history h JOIN channels c ON c.id = h.channel_id
@@ -524,7 +619,7 @@ pub fn list_watch_history(db: &Db) -> Result<Vec<HistoryEntry>> {
 /// keeps these in a map so channel rows can cheaply look up whether they
 /// have a progress bar to draw.
 pub fn list_history_progress(db: &Db) -> Result<Vec<HistoryProgress>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let mut stmt = conn.prepare(
         "SELECT channel_id, time_pos, duration, watched_at, finished
            FROM watch_history",
@@ -544,7 +639,7 @@ pub fn list_history_progress(db: &Db) -> Result<Vec<HistoryProgress>> {
 }
 
 pub fn get_watch_entry(db: &Db, channel_id: i64) -> Result<Option<HistoryProgress>> {
-    let conn = db.lock().unwrap();
+    let conn = db.read();
     let row = conn
         .query_row(
             "SELECT channel_id, time_pos, duration, watched_at, finished
@@ -565,21 +660,23 @@ pub fn get_watch_entry(db: &Db, channel_id: i64) -> Result<Option<HistoryProgres
 }
 
 pub fn remove_watch_entry(db: &Db, channel_id: i64) -> Result<()> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     conn.execute("DELETE FROM watch_history WHERE channel_id = ?1", [channel_id])?;
     Ok(())
 }
 
 pub fn clear_watch_history(db: &Db) -> Result<()> {
-    let conn = db.lock().unwrap();
+    let conn = db.write();
     conn.execute("DELETE FROM watch_history", [])?;
     Ok(())
 }
 
 // ---------- programmes ----------
 
-pub fn upsert_programmes(db: &Db, items: &[Programme]) -> Result<usize> {
-    let mut conn = db.lock().unwrap();
+/// Store a parsed guide: its programmes, and its channel display names for
+/// name-based matching.
+pub fn upsert_guide(db: &Db, guide: &crate::sources::xmltv::Guide) -> Result<usize> {
+    let mut conn = db.write();
     let tx = conn.transaction()?;
     {
         let mut stmt = tx.prepare(
@@ -590,8 +687,15 @@ pub fn upsert_programmes(db: &Db, items: &[Programme]) -> Result<usize> {
                 title = excluded.title,
                 description = excluded.description",
         )?;
-        for p in items {
+        for p in &guide.programmes {
             stmt.execute(params![p.channel_tvg_id, p.start, p.stop, p.title, p.description])?;
+        }
+        let mut names = tx.prepare("INSERT OR IGNORE INTO epg_channels(name_key, id) VALUES (?1, ?2)")?;
+        for (id, display_name) in &guide.channel_names {
+            let key = crate::sources::xmltv::channel_name_key(display_name);
+            if !key.is_empty() {
+                names.execute(params![key, id])?;
+            }
         }
     }
     // Programmes are only ever upserted, so without pruning every XMLTV
@@ -602,9 +706,20 @@ pub fn upsert_programmes(db: &Db, items: &[Programme]) -> Result<usize> {
         [],
     )?;
     tx.commit()?;
-    Ok(items.len())
+    Ok(guide.programmes.len())
 }
 
+fn row_to_programme(r: &rusqlite::Row) -> rusqlite::Result<Programme> {
+    Ok(Programme {
+        channel_tvg_id: r.get("channel_tvg_id")?,
+        start: r.get("start")?,
+        stop: r.get("stop")?,
+        title: r.get("title")?,
+        description: r.get("description")?,
+    })
+}
+
+/// Programmes overlapping `[from, to)` for the given guide ids.
 pub fn programmes_for_channels(
     db: &Db,
     tvg_ids: &[String],
@@ -614,56 +729,35 @@ pub fn programmes_for_channels(
     if tvg_ids.is_empty() {
         return Ok(vec![]);
     }
-    let conn = db.lock().unwrap();
-    let placeholders = std::iter::repeat("?").take(tvg_ids.len()).collect::<Vec<_>>().join(",");
+    let conn = db.read();
+    let placeholders = vec!["?"; tvg_ids.len()].join(",");
     let sql = format!(
         "SELECT channel_tvg_id, start, stop, title, description
            FROM programmes
-          WHERE channel_tvg_id IN ({}) AND stop > ? AND start < ?
-          ORDER BY channel_tvg_id, start",
-        placeholders
+          WHERE channel_tvg_id IN ({placeholders}) AND stop > ? AND start < ?
+          ORDER BY channel_tvg_id, start"
     );
+    let mut args: Vec<Box<dyn rusqlite::ToSql>> = tvg_ids
+        .iter()
+        .map(|s| Box::new(s.to_lowercase()) as Box<dyn rusqlite::ToSql>)
+        .collect();
+    args.push(Box::new(from));
+    args.push(Box::new(to));
+    let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
-    let mut args: Vec<&dyn rusqlite::ToSql> = tvg_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-    let from_box: Box<dyn rusqlite::ToSql> = Box::new(from);
-    let to_box: Box<dyn rusqlite::ToSql> = Box::new(to);
-    args.push(from_box.as_ref());
-    args.push(to_box.as_ref());
     let rows = stmt
-        .query_map(args.as_slice(), |r| {
-            Ok(Programme {
-                channel_tvg_id: r.get("channel_tvg_id")?,
-                start: r.get("start")?,
-                stop: r.get("stop")?,
-                title: r.get("title")?,
-                description: r.get("description")?,
-            })
-        })?
+        .query_map(refs.as_slice(), row_to_programme)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
-pub fn current_programme(db: &Db, tvg_id: &str) -> Result<Option<Programme>> {
-    let conn = db.lock().unwrap();
-    let row = conn
-        .query_row(
-            "SELECT channel_tvg_id, start, stop, title, description
-               FROM programmes
-              WHERE channel_tvg_id = ?1 AND start <= strftime('%s','now') AND stop > strftime('%s','now')
-              LIMIT 1",
-            [tvg_id],
-            |r| {
-                Ok(Programme {
-                    channel_tvg_id: r.get("channel_tvg_id")?,
-                    start: r.get("start")?,
-                    stop: r.get("stop")?,
-                    title: r.get("title")?,
-                    description: r.get("description")?,
-                })
-            },
-        )
-        .optional()?;
-    Ok(row)
+/// What's on right now for each of the given guide ids (at most one
+/// programme per id). One query for a whole screen of channel rows.
+pub fn now_playing(db: &Db, tvg_ids: &[String]) -> Result<Vec<Programme>> {
+    let now = chrono::Utc::now().timestamp();
+    let mut rows = programmes_for_channels(db, tvg_ids, now, now + 1)?;
+    rows.dedup_by(|a, b| a.channel_tvg_id == b.channel_tvg_id);
+    Ok(rows)
 }
 
 #[cfg(test)]
@@ -674,7 +768,10 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA_SQL).unwrap();
         migrate(&conn).unwrap();
-        Arc::new(Mutex::new(conn))
+        // Separate in-memory connections would be separate databases, so
+        // tests route reads and writes through the same one.
+        let conn = Arc::new(Mutex::new(conn));
+        Db { write: conn.clone(), read: conn }
     }
 
     fn ch(name: &str, url: &str) -> ChannelInsert {
@@ -726,9 +823,33 @@ mod tests {
         assert!(list_episodes(&db, show_id).unwrap().is_empty());
     }
 
+    #[test]
+    fn channels_without_tvg_id_match_guide_by_name() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        let with_id = ChannelInsert { tvg_id: Some("Kanal5.SE".into()), ..ch("Kanal 5", "http://h/k5") };
+        replace_channels(&db, sid, &[ch("SE: SVT1 HD", "http://h/1"), with_id, ch("Unknown", "http://h/u")]).unwrap();
+        let guide = crate::sources::xmltv::Guide {
+            programmes: vec![Programme {
+                channel_tvg_id: "svt1.se".into(),
+                start: 0,
+                stop: i64::MAX / 2,
+                title: "Rapport".into(),
+                description: None,
+            }],
+            channel_names: vec![("svt1.se".into(), "SVT1".into())],
+        };
+        upsert_guide(&db, &guide).unwrap();
+
+        let rows = list_channels(&db, Some(sid), None, None).unwrap();
+        let ids: Vec<Option<&str>> = rows.iter().map(|c| c.tvg_id.as_deref()).collect();
+        assert_eq!(ids, vec![Some("svt1.se"), Some("kanal5.se"), None]);
+        let now = now_playing(&db, &["SVT1.se".into()]).unwrap();
+        assert_eq!(now[0].title, "Rapport");
+    }
+
     fn id_of(db: &Db, name: &str) -> i64 {
-        db.lock()
-            .unwrap()
+        db.read()
             .query_row("SELECT id FROM channels WHERE name = ?1", [name], |r| r.get(0))
             .unwrap()
     }

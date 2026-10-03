@@ -5,7 +5,9 @@ use crate::error::Result;
 ///
 /// Tolerant of messy real-world files: ignores blank lines, comments other than
 /// `#EXTINF`, and lines without a following URL. Extracts `tvg-id`, `tvg-name`,
-/// `tvg-logo`, and `group-title` attributes when present.
+/// `tvg-logo`, and `group-title` attributes when present, plus per-stream
+/// HTTP headers from `#EXTVLCOPT:http-user-agent=` / `http-referrer=` lines
+/// and Kodi-style `url|User-Agent=…&Referer=…` suffixes.
 pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
     let mut out = Vec::new();
     let mut pending: Option<PartialEntry> = None;
@@ -19,13 +21,36 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
             pending = Some(parse_extinf(rest));
             continue;
         }
-        if line.starts_with('#') {
-            // Ignore other directives (EXTVLCOPT, PLAYLIST, etc.)
+        if let Some(opt) = line.strip_prefix("#EXTVLCOPT:") {
+            let entry = pending.get_or_insert_with(PartialEntry::default);
+            if let Some((key, value)) = opt.split_once('=') {
+                match key.trim().to_ascii_lowercase().as_str() {
+                    "http-user-agent" => entry.user_agent = non_empty(value),
+                    "http-referrer" | "http-referer" => entry.referrer = non_empty(value),
+                    _ => {}
+                }
+            }
             continue;
         }
-        // Non-comment line — treat as a URL.
-        let stream_url = line.to_string();
-        let entry = pending.take().unwrap_or_default();
+        if line.starts_with('#') {
+            // Ignore other directives (PLAYLIST, EXTGRP, etc.)
+            continue;
+        }
+        // Non-comment line — treat as a URL, minus any `|header=…` suffix.
+        let mut entry = pending.take().unwrap_or_default();
+        let stream_url = match line.split_once('|') {
+            Some((url, headers)) => {
+                for (key, value) in url::form_urlencoded::parse(headers.as_bytes()) {
+                    match key.to_ascii_lowercase().as_str() {
+                        "user-agent" => entry.user_agent = non_empty(&value),
+                        "referer" | "referrer" => entry.referrer = non_empty(&value),
+                        _ => {}
+                    }
+                }
+                url.trim().to_string()
+            }
+            None => line.to_string(),
+        };
         let kind = detect_kind(&stream_url).to_string();
         out.push(ChannelInsert {
             tvg_id: entry.tvg_id,
@@ -38,6 +63,8 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
             group: entry.group,
             stream_url,
             kind,
+            user_agent: entry.user_agent,
+            referrer: entry.referrer,
             ..Default::default()
         });
     }
@@ -69,6 +96,8 @@ struct PartialEntry {
     name: String,
     logo: Option<String>,
     group: Option<String>,
+    user_agent: Option<String>,
+    referrer: Option<String>,
 }
 
 /// Parse the body of `#EXTINF:<duration>[ attr="val" ...],<name>`.
@@ -240,6 +269,21 @@ mod tests {
         assert_eq!(out[0].kind, "live");
         assert_eq!(out[1].name, "Plain Channel");
         assert!(out[1].group.is_none());
+    }
+
+    #[test]
+    fn reads_per_stream_headers() {
+        let src = "#EXTM3U\n\
+                   #EXTINF:-1,A\n#EXTVLCOPT:http-user-agent=Smart TV/1.0\n#EXTVLCOPT:http-referrer=http://ref/\nhttp://h/a.m3u8\n\
+                   #EXTINF:-1,B\nhttp://h/b.m3u8|User-Agent=VLC%2F3.0&Referer=http%3A%2F%2Fr%2F\n\
+                   #EXTINF:-1,C\nhttp://h/c.m3u8\n";
+        let out = parse(src).unwrap();
+        assert_eq!(out[0].user_agent.as_deref(), Some("Smart TV/1.0"));
+        assert_eq!(out[0].referrer.as_deref(), Some("http://ref/"));
+        assert_eq!(out[1].stream_url, "http://h/b.m3u8");
+        assert_eq!(out[1].user_agent.as_deref(), Some("VLC/3.0"));
+        assert_eq!(out[1].referrer.as_deref(), Some("http://r/"));
+        assert!(out[2].user_agent.is_none());
     }
 
     #[test]

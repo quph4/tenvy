@@ -58,20 +58,35 @@ pub async fn mpv_init(app: AppHandle, holder: State<'_, MpvHolder>) -> Result<()
     }
 }
 
+/// Play a channel by id. The URL and any required HTTP headers come from
+/// the database, so the webview never hands arbitrary URLs to mpv.
 #[tauri::command]
 pub async fn mpv_load(
     app: AppHandle,
     holder: State<'_, MpvHolder>,
-    url: String,
+    state: State<'_, super::AppState>,
+    channel_id: i64,
     start_seconds: Option<f64>,
 ) -> Result<()> {
+    let db = state.db.clone();
+    let playback = tokio::task::spawn_blocking(move || crate::db::get_playback(&db, channel_id))
+        .await??
+        .ok_or_else(|| err!("Channel not found"))?;
     #[cfg(windows)]
     {
-        ensure_mpv(&app, &holder).await?.load(&url, start_seconds).await
+        ensure_mpv(&app, &holder)
+            .await?
+            .load(
+                &playback.stream_url,
+                start_seconds,
+                playback.user_agent.as_deref(),
+                playback.referrer.as_deref(),
+            )
+            .await
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, holder, url, start_seconds);
+        let _ = (app, holder, playback, start_seconds);
         Err(err!("embedded mpv is only supported on Windows right now"))
     }
 }

@@ -9,7 +9,8 @@ import { useToast } from '../stores/toast'
 import { cn } from '../lib/cn'
 import { groupByShow, toEpisode, type Episode, type Show } from '../lib/series'
 import { usePref } from '../lib/prefs'
-import type { Channel, HistoryProgress, Programme } from '../types'
+import { useNowPlaying } from '../stores/nowPlaying'
+import type { Channel, HistoryProgress } from '../types'
 import { Trash2 } from 'lucide-react'
 
 const ROW_HEIGHT = 56
@@ -512,23 +513,9 @@ function ChannelRow({
   onClick(): void
 }) {
   const [logoOk, setLogoOk] = useState(true)
-  const [now, setNow] = useState<Programme | null>(null)
-  const { push } = useToast()
+  const now = useNowPlaying(channel.kind === 'live' ? channel.tvgId : null)
+  const push = useToast((s) => s.push)
   const progress = useHistory((s) => s.progress.get(channel.id))
-
-  useEffect(() => {
-    let cancelled = false
-    if (!channel.tvgId) return
-    ipc
-      .currentProgramme(channel.tvgId)
-      .then((p) => {
-        if (!cancelled) setNow(p)
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [channel.tvgId])
 
   const toggleFav = async (e: React.MouseEvent) => {
     e.stopPropagation()

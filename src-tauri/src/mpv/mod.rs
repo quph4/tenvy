@@ -271,26 +271,44 @@ impl Mpv {
         Ok(())
     }
 
-    pub async fn load(&self, url: &str, start_seconds: Option<f64>) -> Result<()> {
+    /// Open a stream. `user_agent` / `referrer` override the global defaults
+    /// for this file only — some providers require a specific player UA.
+    pub async fn load(
+        &self,
+        url: &str,
+        start_seconds: Option<f64>,
+        user_agent: Option<&str>,
+        referrer: Option<&str>,
+    ) -> Result<()> {
         stream_url::validate(url)?;
         tracing::info!(
             target: "lumen_lib",
-            "mpv load url={} start={:?}",
+            "mpv load url={} start={:?} ua={} referrer={}",
             stream_url::redact(url),
-            start_seconds
+            start_seconds,
+            user_agent.is_some(),
+            referrer.is_some()
         );
-        let args: Vec<Value> = if let Some(t) = start_seconds.filter(|t| *t > 1.0) {
-            // Options dict applied before the first frame — `start=` resumes.
-            vec![
-                json!("loadfile"),
-                json!(url),
-                json!("replace"),
-                json!(0),
-                json!(format!("start={:.3}", t)),
-            ]
-        } else {
-            vec![json!("loadfile"), json!(url), json!("replace")]
-        };
+
+        // File-local options, applied before the first frame (`start=`
+        // resumes). Values use mpv's `%len%value` quoting so commas and
+        // equals signs inside a user agent can't break the list.
+        let mut options = Vec::new();
+        if let Some(t) = start_seconds.filter(|t| *t > 1.0) {
+            options.push(format!("start={:.3}", t));
+        }
+        for (key, value) in [("user-agent", user_agent), ("referrer", referrer)] {
+            if let Some(v) = value {
+                options.push(format!("{}=%{}%{}", key, v.len(), v));
+            }
+        }
+
+        let mut args = vec![json!("loadfile"), json!(url), json!("replace")];
+        if !options.is_empty() {
+            // index (-1 = unused by `replace`), then the options list.
+            args.push(json!(-1));
+            args.push(json!(options.join(",")));
+        }
         self.command(&args).await?;
         Ok(())
     }

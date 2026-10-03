@@ -16,6 +16,7 @@ import { useHistory } from './stores/history'
 import { usePlayback } from './stores/playback'
 import { useUI } from './stores/ui'
 import { attachIngestListener } from './stores/ingest'
+import { attachGuideListener } from './stores/nowPlaying'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
 
 function App() {
@@ -38,18 +39,18 @@ function App() {
 
   // Tauri emits `playlist-progress` events during ingest; the listener
   // keeps the ingest store in sync so IngestOverlay can render itself.
+  // Guides are downloaded in the background after an ingest; when one
+  // lands, cached now-playing data is dropped so rows pick it up.
   useEffect(() => {
-    let unlisten: (() => void) | null = null
-    attachIngestListener()
-      .then((fn) => {
-        unlisten = fn
-      })
-      .catch(() => {
-        /* non-fatal — the overlay simply won't animate stage progress */
-      })
-    return () => {
-      unlisten?.()
+    const unlisteners: (() => void)[] = []
+    for (const attach of [attachIngestListener, attachGuideListener]) {
+      attach()
+        .then((fn) => unlisteners.push(fn))
+        .catch(() => {
+          /* non-fatal — the overlay / guide just won't live-update */
+        })
     }
+    return () => unlisteners.forEach((fn) => fn())
   }, [])
 
   useKeyboardShortcuts()

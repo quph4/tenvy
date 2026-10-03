@@ -59,7 +59,7 @@ export function Controls({
       const s = usePlayback.getState()
       const audioTrack = s.currentAudio ?? s.preferredAudioTrack
       const subtitleTrack = s.currentSubtitle ?? s.preferredSubtitleTrack
-      const player = await ipc.openExternal(channel.streamUrl, { audioTrack, subtitleTrack })
+      const player = await ipc.openExternal(channel.id, { audioTrack, subtitleTrack })
       const name = player.split(/[\\/]/).pop() ?? player
       push('success', `Launched ${name}`)
     } catch (e) {

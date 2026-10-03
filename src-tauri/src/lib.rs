@@ -82,7 +82,7 @@ pub fn run() {
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,
-            commands::current_programme,
+            commands::now_playing,
             commands::open_external,
             commands::record_history,
             commands::list_history,

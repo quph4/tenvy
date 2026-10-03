@@ -101,23 +101,24 @@ export const ipc = {
   }): Promise<Programme[]> {
     return invoke('programmes_for_channels', args)
   },
-  async currentProgramme(tvgId: string): Promise<Programme | null> {
-    return invoke('current_programme', { tvgId })
+  /** What's on now for each guide id (at most one programme per id). */
+  async nowPlaying(tvgIds: string[]): Promise<Programme[]> {
+    return invoke('now_playing', { tvgIds })
   },
 
   /**
-   * Launch the URL in mpv/VLC. Optionally pre-select audio/subtitle tracks
+   * Open a channel in mpv/VLC. Optionally pre-select audio/subtitle tracks
    * by mpv track id — the backend turns these into mpv `--aid` / `--sid`
    * flags (or VLC's 0-based `--audio-track` / `--sub-track`). Pass `null`
    * to keep the player's defaults; pass a number to force that track.
    * Returns the path of the external player that was launched.
    */
   async openExternal(
-    url: string,
+    channelId: number,
     opts?: { audioTrack?: number | null; subtitleTrack?: number | null },
   ): Promise<string> {
     return invoke('open_external', {
-      url,
+      channelId,
       audioTrack: opts?.audioTrack ?? null,
       subtitleTrack: opts?.subtitleTrack ?? null,
     })
@@ -131,8 +132,9 @@ export const ipc = {
   async mpvInit(): Promise<void> {
     return invoke('mpv_init')
   },
-  async mpvLoad(url: string, startSeconds: number | null = null): Promise<void> {
-    return invoke('mpv_load', { url, startSeconds })
+  /** Play a channel by id; the backend resolves its URL and headers. */
+  async mpvLoad(channelId: number, startSeconds: number | null = null): Promise<void> {
+    return invoke('mpv_load', { channelId, startSeconds })
   },
   async mpvSetPause(paused: boolean): Promise<void> {
     return invoke('mpv_set_pause', { paused })
