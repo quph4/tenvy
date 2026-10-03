@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Bell, Heart, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
 import { usePlaylist } from '../../stores/playlist'
@@ -9,12 +10,20 @@ import { useUpdater } from '../../stores/updater'
 import { useReminders } from '../../stores/reminders'
 import { openSupportLink, useAppInfo } from '../../stores/appInfo'
 import { languageName, useTvPrefs } from '../../stores/tvPrefs'
+import { daysLeft, expiryLabel, useAccounts } from '../../stores/accounts'
+import { ParentalSection } from './ParentalSection'
+import { cn } from '../../lib/cn'
 import { hhmm, weekday } from '../../lib/time'
 
 export function SettingsPanel() {
   const { settingsOpen, toggleSettings, openAddSource } = useUI()
   const { sources, hydrate } = usePlaylist()
   const { push } = useToast()
+
+  // Fresh subscription details each time Settings opens.
+  useEffect(() => {
+    if (settingsOpen) useAccounts.getState().loadAll(sources).catch(() => {})
+  }, [settingsOpen, sources])
 
   if (!settingsOpen) return null
 
@@ -92,6 +101,7 @@ export function SettingsPanel() {
                   <div className="truncate text-[11px] text-neutral-500">
                     {s.kind.toUpperCase()} · {new URL(s.url.startsWith('http') ? s.url : 'file://' + s.url).hostname || s.url}
                   </div>
+                  <AccountLine sourceId={s.id} />
                 </div>
                 <button
                   onClick={() => refresh(s.id, s.name)}
@@ -112,6 +122,7 @@ export function SettingsPanel() {
           </ul>
         </div>
 
+        <ParentalSection />
         <PlaybackSection />
         <RemindersSection />
         <AboutSection />
@@ -189,6 +200,21 @@ function AboutSection() {
           </button>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Subscription status, expiry and connections for an Xtream source. */
+function AccountLine({ sourceId }: { sourceId: number }) {
+  const info = useAccounts((s) => s.bySource[sourceId])
+  if (!info) return null
+  const left = daysLeft(info)
+  const warn = left != null && left <= 14
+  const conns =
+    info.maxConnections != null ? `${info.activeConnections ?? 0}/${info.maxConnections} connections` : null
+  return (
+    <div className={cn('truncate text-[11px]', warn ? 'text-amber-300' : 'text-neutral-500')}>
+      {[info.status, info.isTrial ? 'Trial' : null, expiryLabel(info), conns].filter(Boolean).join(' · ')}
     </div>
   )
 }

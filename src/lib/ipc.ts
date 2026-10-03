@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
+  AccountInfo,
   AppInfo,
   Channel,
   ChannelKind,
@@ -8,6 +9,7 @@ import type {
   HistoryEntry,
   HistoryProgress,
   MpvState,
+  ParentalStatus,
   Programme,
   Source,
   Reminder,
@@ -75,6 +77,37 @@ export const ipc = {
   /** Upcoming and ongoing reminders, soonest first. */
   async listReminders(): Promise<Reminder[]> {
     return invoke('list_reminders')
+  },
+  /** Hide/show (`hidden`) or lock/unlock (`locked`) categories; omit a flag to leave it. */
+  async setGroupPrefs(args: {
+    sourceId: number
+    kind: ChannelKind
+    names: string[]
+    hidden?: boolean
+    locked?: boolean
+  }): Promise<void> {
+    return invoke('set_group_prefs', { ...args, hidden: args.hidden ?? null, locked: args.locked ?? null })
+  },
+  async parentalStatus(): Promise<ParentalStatus> {
+    return invoke('parental_status')
+  },
+  /** True if the PIN was right. */
+  async parentalUnlock(pin: string): Promise<boolean> {
+    return invoke('parental_unlock', { pin })
+  },
+  async parentalLock(): Promise<void> {
+    return invoke('parental_lock')
+  },
+  /** Set, change, or (next = null) remove the PIN. */
+  async setParentalPin(current: string | null, next: string | null): Promise<void> {
+    return invoke('set_parental_pin', { current, new: next })
+  },
+  async recentlyAdded(kind: 'movie' | 'series', limit = 20): Promise<Channel[]> {
+    return invoke('recently_added', { kind, limit })
+  },
+  /** Subscription details for an Xtream source; null for playlists. */
+  async accountInfo(sourceId: number): Promise<AccountInfo | null> {
+    return invoke('account_info', { sourceId })
   },
   async openLicenses(): Promise<void> {
     return invoke('open_licenses')

@@ -265,14 +265,24 @@ const reminders: { channelId: number; start: number; stop: number; title: string
 type Args = Record<string, any>
 
 function listChannels({ group, kind }: Args): Channel[] {
-  if (group === '__favorites') return channels.filter((c) => favorites.has(c.id))
-  return channels.filter((c) => (!kind || c.kind === kind) && (!group || c.group === group))
+  if (group === '__favorites') return channels.filter((c) => favorites.has(c.id) && visible(c, false))
+  return channels.filter((c) => (!kind || c.kind === kind) && (!group || c.group === group) && visible(c, !group))
+}
+
+// Category prefs as the app sets them: "kind/name" → flags.
+const groupPrefs = new Map<string, { hidden: boolean; locked: boolean }>()
+const parental = { pin: null as string | null, unlocked: false }
+const isUnlocked = () => parental.pin == null || parental.unlocked
+const prefOf = (c: Channel) => groupPrefs.get(`${c.kind}/${c.group}`) ?? { hidden: false, locked: false }
+const visible = (c: Channel, skipHidden: boolean) => {
+  const p = prefOf(c)
+  return !(skipHidden && p.hidden) && !(p.locked && !isUnlocked())
 }
 
 function groups({ kind }: Args) {
   const counts = new Map<string, number>()
   for (const c of channels) if (!kind || c.kind === kind) counts.set(c.group!, (counts.get(c.group!) ?? 0) + 1)
-  return [...counts].map(([name, count]) => ({ name, count }))
+  return [...counts].map(([name, count]) => ({ name, count, ...(groupPrefs.get(`${kind}/${name}`) ?? { hidden: false, locked: false }) }))
 }
 
 function handle(cmd: string, a: Args = {}): unknown {
@@ -286,7 +296,7 @@ function handle(cmd: string, a: Args = {}): unknown {
       return listChannels(a)
     case 'search_channels': {
       const q = String(a.query).toLowerCase()
-      return channels.filter((c) => c.name.toLowerCase().includes(q) && (!a.kind || c.kind === a.kind))
+      return channels.filter((c) => c.name.toLowerCase().includes(q) && (!a.kind || c.kind === a.kind) && visible(c, true))
     }
     case 'list_episodes':
       return episodes(byId.get(a.channelId)!)
@@ -336,6 +346,42 @@ function handle(cmd: string, a: Args = {}): unknown {
       if (i >= 0) reminders.splice(i, 1)
       return null
     }
+    case 'recently_added':
+      return channels
+        .filter((c) => c.kind === a.kind && c.parentId == null && visible(c, true))
+        .sort((x, y) => (y.added ?? 0) - (x.added ?? 0))
+        .slice(0, a.limit)
+    case 'account_info':
+      return {
+        status: 'Active',
+        expiresAt: now + 214 * 86_400,
+        isTrial: false,
+        activeConnections: 0,
+        maxConnections: 1,
+        createdAt: now - 150 * 86_400,
+      }
+    case 'parental_status':
+      return { pinSet: parental.pin != null, unlocked: isUnlocked() }
+    case 'parental_unlock':
+      if (a.pin !== parental.pin) return false
+      parental.unlocked = true
+      return true
+    case 'parental_lock':
+      parental.unlocked = false
+      return null
+    case 'set_parental_pin':
+      parental.pin = a.new
+      parental.unlocked = false
+      return null
+    case 'set_group_prefs':
+      for (const name of a.names as string[]) {
+        const key = `${a.kind}/${name}`
+        const cur = groupPrefs.get(key) ?? { hidden: false, locked: false }
+        groupPrefs.set(key, { hidden: a.hidden ?? cur.hidden, locked: a.locked ?? cur.locked })
+      }
+      return null
+    case 'get_channel':
+      return byId.get(a.id) ?? null
     case 'app_info':
       return {
         installedAt: now - 30 * 86_400,
@@ -385,7 +431,7 @@ export function installDemo() {
 
 /**
  * Jump straight to a screen, for scripted screenshots:
- * `?demo&scene=welcome|guide|movies|series|details|show|live`.
+ * `?demo&scene=welcome|home|guide|movies|series|details|show|live|categories`.
  */
 export async function applyScene() {
   const scene = new URLSearchParams(location.search).get('scene')
@@ -394,10 +440,13 @@ export async function applyScene() {
   // Let the app's own startup load the sources first.
   for (let i = 0; i < 50 && usePlaylist.getState().sources.length === 0; i++) await new Promise((r) => setTimeout(r, 50))
   const pl = usePlaylist.getState()
+  // Tenvy opens on Home; every other scene starts from the main view.
+  if (scene !== 'home') useUI.getState().setView('player')
   if (scene === 'guide') useUI.getState().setView('epg')
   if (scene === 'movies' || scene === 'details') await pl.setActiveKind('movie')
   if (scene === 'series') await pl.setActiveKind('series')
   if (scene === 'details') await pl.openDetails(byId.get(102)!)
+  if (scene === 'categories') useUI.getState().setManageCategories(true)
   if (scene === 'show') {
     await pl.setActiveKind('series')
     await pl.openDetails(byId.get(300)!)

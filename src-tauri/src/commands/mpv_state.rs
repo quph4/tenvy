@@ -110,6 +110,7 @@ pub async fn mpv_load(
     start_seconds: Option<f64>,
     prefs: Option<TrackPrefs>,
 ) -> Result<()> {
+    super::ensure_playable(&state, channel_id).await?;
     let options = prefs.unwrap_or_default().file_options();
     let db = state.db.clone();
     let playback = tokio::task::spawn_blocking(move || crate::db::get_playback(&db, channel_id))
@@ -146,6 +147,7 @@ pub async fn mpv_load_catchup(
     stop: i64,
     prefs: Option<TrackPrefs>,
 ) -> Result<()> {
+    super::ensure_playable(&state, channel_id).await?;
     let options = prefs.unwrap_or_default().file_options();
     let url = super::catchup_url(&state, channel_id, start, stop).await?;
     let db = state.db.clone();

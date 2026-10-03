@@ -62,7 +62,7 @@ export function useKeyboardShortcuts() {
         return
       }
       if (e.key === 'Escape') {
-        if (ui.searchOpen || ui.addSourceOpen || ui.settingsOpen) return // those handle their own escape
+        if (ui.searchOpen || ui.addSourceOpen || ui.settingsOpen || ui.manageCategoriesOpen) return // those handle their own escape
         if (pb.pendingResume) return // ResumePrompt handles its own escape
         if (pb.mini) pb.setMini(false)
         else if (pb.fullscreen) pb.setFullscreen(false)

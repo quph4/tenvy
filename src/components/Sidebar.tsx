@@ -4,10 +4,12 @@ import {
   Film,
   Folder,
   LayoutGrid,
+  Lock,
   MonitorPlay,
   History as HistoryIcon,
   Pin,
   PinOff,
+  SlidersHorizontal,
   Star,
   Tv,
 } from 'lucide-react'
@@ -16,6 +18,8 @@ import { FAVORITES_GROUP, HISTORY_GROUP, usePlaylist } from '../stores/playlist'
 import type { ChannelKind, Group } from '../types'
 import { cn } from '../lib/cn'
 import { usePref } from '../lib/prefs'
+import { useParental } from '../stores/parental'
+import { useUI } from '../stores/ui'
 
 /**
  * "provider" = whatever order the M3U / Xtream API handed us (curated by
@@ -46,8 +50,10 @@ export function Sidebar() {
     // The backend already returns groups in provider order. For A–Z we
     // re-sort here; pinned groups ignore the toggle and always follow the
     // user's pinning sequence, which matches how TiviMate treats pins.
+    // Hidden categories live in Manage categories, not here.
+    const visible = groups.filter((g) => !g.hidden)
     const sorted =
-      sort === 'name' ? [...groups].sort((a, b) => a.name.localeCompare(b.name)) : groups
+      sort === 'name' ? [...visible].sort((a, b) => a.name.localeCompare(b.name)) : visible
 
     const bySlot: Group[] = []
     const rest: Group[] = []
@@ -60,6 +66,17 @@ export function Sidebar() {
     bySlot.sort((a, b) => (pinIndex.get(a.name)! - pinIndex.get(b.name)!))
     return { pinnedGroups: bySlot, otherGroups: rest }
   }, [groups, pins, sort])
+
+  const hiddenCount = groups.filter((g) => g.hidden).length
+  const parentalOpen = useParental((s) => s.status.unlocked)
+
+  /** Open a category, asking for the PIN first if it's locked. */
+  const openGroup = async (g: Group) => {
+    if (g.locked && !(await useParental.getState().requireUnlocked(`"${g.name}" is locked.`))) return
+    setActiveGroup(g.name)
+  }
+  const groupIcon = (g: Group, fallback: React.ReactNode) =>
+    g.locked ? <Lock className={cn('h-3.5 w-3.5', parentalOpen ? 'text-neutral-500' : 'text-accent-400')} /> : fallback
 
   const togglePin = (name: string) => {
     const current = pinned[activeKind] ?? []
@@ -123,10 +140,10 @@ export function Sidebar() {
               <SidebarItem
                 key={`pin-${g.name}`}
                 label={g.name}
-                icon={<Pin className="h-3.5 w-3.5 text-accent-400" />}
+                icon={groupIcon(g, <Pin className="h-3.5 w-3.5 text-accent-400" />)}
                 badge={g.count}
                 active={activeGroup === g.name}
-                onClick={() => setActiveGroup(g.name)}
+                onClick={() => openGroup(g)}
                 pinned
                 onTogglePin={() => togglePin(g.name)}
               />
@@ -136,6 +153,15 @@ export function Sidebar() {
 
         <div className="mt-3 mb-1 flex items-center justify-between px-2 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">
           <span>Groups</span>
+          <span className="flex-1" />
+          <button
+            onClick={() => useUI.getState().setManageCategories(true)}
+            className="grid h-5 w-5 place-items-center rounded text-neutral-600 hover:bg-neutral-800/70 hover:text-neutral-300"
+            aria-label="Manage categories"
+            title="Hide or lock categories"
+          >
+            <SlidersHorizontal className="h-3 w-3" />
+          </button>
           <button
             onClick={() => setSort(sort === 'provider' ? 'name' : 'provider')}
             className="grid h-5 w-5 place-items-center rounded text-neutral-600 hover:bg-neutral-800/70 hover:text-neutral-300"
@@ -162,13 +188,21 @@ export function Sidebar() {
           <SidebarItem
             key={g.name}
             label={g.name}
-            icon={<Folder className="h-3.5 w-3.5" />}
+            icon={groupIcon(g, <Folder className="h-3.5 w-3.5" />)}
             badge={g.count}
             active={activeGroup === g.name}
-            onClick={() => setActiveGroup(g.name)}
+            onClick={() => openGroup(g)}
             onTogglePin={() => togglePin(g.name)}
           />
         ))}
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => useUI.getState().setManageCategories(true)}
+            className="mt-2 w-full px-2 py-1.5 text-left text-[11px] text-neutral-600 hover:text-neutral-400"
+          >
+            {hiddenCount} hidden {hiddenCount === 1 ? 'category' : 'categories'} · Manage
+          </button>
+        )}
       </nav>
     </aside>
   )

@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Added
+- Home: continue watching, recently watched and favorite channels (with
+  what's on), favorite films and series, and the newest movies and
+  series — plus your subscription status at a glance.
+- Subscription details from your provider: status, expiry date and
+  connections in Settings, and a heads-up a week before it runs out.
+- Manage categories: hide the ones you never watch (they leave "All",
+  search and the sidebar), filter and "show only these" for huge lists.
+- Parental lock: lock categories behind a PIN (one click for adult
+  categories); locked content stays out of lists, search and playback
+  until the PIN is entered.
 - TV-style channel switching: type a channel number (0–9), Backspace for
   the previous channel, PgUp/PgDn as well as ↑/↓, and a banner over the
   picture with the channel, what's on now (and how long is left) and next.

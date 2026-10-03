@@ -18,6 +18,8 @@ import { showChannelInfo } from '../../lib/osd'
 const DRAWER_WIDTH = 288 // px — tailwind w-72
 /** Wait before retrying a stream that failed to open. */
 const RETRY_DELAY_MS = 2000
+/** A live channel on screen this long counts as watched. */
+const LIVE_WATCHED_MS = 10_000
 
 /**
  * Open whatever the playback store says should be playing: the live
@@ -52,6 +54,13 @@ function openCurrent(push: (kind: 'error' | 'info', message: string) => void, re
       if (channel.kind !== 'live' || catchup || resume) return
       rememberLastChannel(channel)
       showChannelInfo(channel).catch(() => {})
+      // Count it as watched once it's stayed on for a bit (zapping past a
+      // channel doesn't), for History and "Recently watched" on Home.
+      window.setTimeout(() => {
+        if (usePlayback.getState().channel?.id === channel.id) {
+          useHistory.getState().record(channel.id, 0, 0, false).catch(() => {})
+        }
+      }, LIVE_WATCHED_MS)
     })
     .catch((e) => {
       // Surface the real failure — unreachable URL, auth rejection, no

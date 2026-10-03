@@ -38,6 +38,15 @@ export function Topbar() {
         <UpdatePill />
         <div className="flex h-8 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/80 text-xs">
           <button
+            onClick={() => setView('home')}
+            className={cn(
+              'px-3 font-medium transition-colors',
+              view === 'home' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300',
+            )}
+          >
+            Home
+          </button>
+          <button
             onClick={() => show('player')}
             className={cn(
               'px-3 font-medium transition-colors',

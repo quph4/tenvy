@@ -10,8 +10,8 @@ use crate::err;
 use crate::remote;
 use crate::error::Result;
 use crate::models::{
-    AddSourceReq, Channel, Group, HistoryEntry, HistoryProgress, PlaylistProgress, Programme,
-    Reminder, Source, SourceKind, SourceStats, VodDetails,
+    AccountInfo, AddSourceReq, Channel, Group, HistoryEntry, HistoryProgress, ParentalStatus,
+    PlaylistProgress, Programme, Reminder, Source, SourceKind, SourceStats, VodDetails,
 };
 use crate::sources::xtream::{self, Xtream};
 use crate::sources::{m3u, xmltv};
@@ -24,6 +24,7 @@ pub struct AppState {
     /// rarely changes; caching keeps browsing back and forth instant and
     /// spares the provider's API.
     pub details_cache: std::sync::Mutex<HashMap<i64, (Instant, VodDetails)>>,
+    pub parental: crate::parental::Parental,
 }
 
 const DETAILS_TTL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -31,6 +32,7 @@ const DETAILS_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 impl AppState {
     pub fn new(db: Db) -> Self {
         Self {
+            parental: crate::parental::Parental::load(&db),
             db,
             http: reqwest::Client::builder()
                 .user_agent(concat!("Tenvy/", env!("CARGO_PKG_VERSION")))
@@ -500,8 +502,9 @@ pub async fn list_channels(
     kind: Option<String>,
 ) -> Result<Vec<Channel>> {
     let db = state.db.clone();
+    let unlocked = state.parental.unlocked();
     tokio::task::spawn_blocking(move || {
-        db::list_channels(&db, source_id, group.as_deref(), kind.as_deref())
+        db::list_channels(&db, source_id, group.as_deref(), kind.as_deref(), unlocked)
     })
     .await?
 }
@@ -514,8 +517,9 @@ pub async fn search_channels(
     kind: Option<String>,
 ) -> Result<Vec<Channel>> {
     let db = state.db.clone();
+    let unlocked = state.parental.unlocked();
     tokio::task::spawn_blocking(move || {
-        db::search_channels(&db, &query, source_id, kind.as_deref())
+        db::search_channels(&db, &query, source_id, kind.as_deref(), unlocked)
     })
     .await?
 }
@@ -566,12 +570,99 @@ pub async fn list_episodes(state: State<'_, AppState>, channel_id: i64) -> Resul
     }
 }
 
+/// Hide/show or lock/unlock categories of one source and kind. Locking
+/// needs a PIN to exist; unlocking (or hiding/showing a locked one) needs
+/// it entered.
+#[tauri::command]
+pub async fn set_group_prefs(
+    state: State<'_, AppState>,
+    source_id: i64,
+    kind: String,
+    names: Vec<String>,
+    hidden: Option<bool>,
+    locked: Option<bool>,
+) -> Result<()> {
+    let status = state.parental.status();
+    if locked == Some(true) && !status.pin_set {
+        return Err(err!("Set a parental PIN first."));
+    }
+    if locked == Some(false) && !status.unlocked {
+        return Err(err!("Enter the parental PIN first."));
+    }
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::set_group_prefs(&db, source_id, &kind, &names, hidden, locked)).await?
+}
+
+#[tauri::command]
+pub async fn parental_status(state: State<'_, AppState>) -> Result<ParentalStatus> {
+    Ok(state.parental.status())
+}
+
+/// Returns whether the PIN was right. Wrong guesses are slowed down.
+#[tauri::command]
+pub async fn parental_unlock(state: State<'_, AppState>, pin: String) -> Result<bool> {
+    let ok = state.parental.unlock(&pin);
+    if !ok {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+    }
+    Ok(ok)
+}
+
+#[tauri::command]
+pub async fn parental_lock(state: State<'_, AppState>) -> Result<()> {
+    state.parental.lock();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_parental_pin(
+    state: State<'_, AppState>,
+    current: Option<String>,
+    new: Option<String>,
+) -> Result<()> {
+    let result = state.parental.set_pin(&state.db, current.as_deref(), new.as_deref());
+    if result.is_err() {
+        tokio::time::sleep(Duration::from_millis(800)).await;
+    }
+    result
+}
+
+/// Refuse to play something in a locked category while locked.
+pub(crate) async fn ensure_playable(state: &AppState, channel_id: i64) -> Result<()> {
+    if state.parental.unlocked() {
+        return Ok(());
+    }
+    let db = state.db.clone();
+    if tokio::task::spawn_blocking(move || db::is_locked(&db, channel_id)).await?? {
+        return Err(err!("This is in a locked category. Enter the parental PIN first."));
+    }
+    Ok(())
+}
+
+/// Newest movies or series, for Home.
+#[tauri::command]
+pub async fn recently_added(state: State<'_, AppState>, kind: String, limit: i64) -> Result<Vec<Channel>> {
+    let db = state.db.clone();
+    let unlocked = state.parental.unlocked();
+    tokio::task::spawn_blocking(move || db::recently_added(&db, &kind, limit.clamp(1, 100), unlocked)).await?
+}
+
+/// Subscription details for an Xtream source; None for plain playlists.
+#[tauri::command]
+pub async fn account_info(state: State<'_, AppState>, source_id: i64) -> Result<Option<AccountInfo>> {
+    match xtream_for_source(&state, source_id).await? {
+        Some(xt) => Ok(Some(xt.account().await?)),
+        None => Ok(None),
+    }
+}
+
 // ---------- favorites ----------
 
 #[tauri::command]
 pub async fn list_favorites(state: State<'_, AppState>) -> Result<Vec<Channel>> {
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || db::list_favorites(&db)).await?
+    let unlocked = state.parental.unlocked();
+    tokio::task::spawn_blocking(move || db::list_favorites(&db, unlocked)).await?
 }
 
 #[tauri::command]
@@ -600,7 +691,8 @@ pub async fn record_history(
 #[tauri::command]
 pub async fn list_history(state: State<'_, AppState>) -> Result<Vec<HistoryEntry>> {
     let db = state.db.clone();
-    tokio::task::spawn_blocking(move || db::list_watch_history(&db)).await?
+    let unlocked = state.parental.unlocked();
+    tokio::task::spawn_blocking(move || db::list_watch_history(&db, unlocked)).await?
 }
 
 #[tauri::command]

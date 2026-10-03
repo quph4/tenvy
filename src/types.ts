@@ -77,6 +77,27 @@ export interface Programme {
 export interface Group {
   name: string
   count: number
+  /** Hidden by the viewer: not in "All", search or the sidebar. */
+  hidden: boolean
+  /** Behind the parental PIN. */
+  locked: boolean
+}
+
+/** Xtream subscription details (Rust models::AccountInfo). */
+export interface AccountInfo {
+  status: string | null
+  /** Epoch seconds; null = never expires. */
+  expiresAt: number | null
+  isTrial: boolean
+  activeConnections: number | null
+  maxConnections: number | null
+  createdAt: number | null
+}
+
+export interface ParentalStatus {
+  pinSet: boolean
+  /** Locked categories are visible right now. */
+  unlocked: boolean
 }
 
 

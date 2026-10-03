@@ -10,6 +10,11 @@ import { SettingsPanel } from './components/Settings/SettingsPanel'
 import { AddSource } from './components/Settings/AddSource'
 import { Toasts } from './components/Toasts'
 import { FirstRun } from './components/FirstRun'
+import { Home } from './components/Home/Home'
+import { PinPrompt } from './components/PinPrompt'
+import { ManageCategories } from './components/Settings/ManageCategories'
+import { useAccounts } from './stores/accounts'
+import { useParental } from './stores/parental'
 import { IngestOverlay } from './components/IngestOverlay'
 import { ResumePrompt } from './components/ResumePrompt'
 import { usePlaylist } from './stores/playlist'
@@ -41,8 +46,11 @@ function App() {
   const watchingVod = usePlayback((s) => !!s.channel && s.channel.kind !== 'live')
 
   useEffect(() => {
+    useParental.getState().refresh().catch(() => {})
     hydrate()
       .then(async () => {
+        // Subscription status for Home and Settings (and an expiry warning).
+        useAccounts.getState().loadAll(usePlaylist.getState().sources).catch(() => {})
         // Optionally pick up where the viewer left off, like a TV.
         const id = lastChannelId()
         if (!useTvPrefs.getState().startWithLastChannel || id == null) return
@@ -85,6 +93,8 @@ function App() {
       <main className="flex flex-1 overflow-hidden">
         {sources.length === 0 ? (
           <FirstRun />
+        ) : view === 'home' && !mini ? (
+          <Home />
         ) : view === 'epg' && !mini ? (
           <>
             {!chromeless && <Sidebar />}
@@ -148,6 +158,8 @@ function App() {
       <SearchPalette />
       <SettingsPanel />
       <AddSource />
+      <ManageCategories />
+      <PinPrompt />
       <Toasts />
       <IngestOverlay />
       <ResumePrompt />

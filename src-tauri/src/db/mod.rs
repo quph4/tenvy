@@ -104,6 +104,14 @@ fn migrate(conn: &Connection) -> Result<()> {
              id       TEXT NOT NULL,
              PRIMARY KEY (name_key, id)
          ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS group_prefs (
+             source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+             kind      TEXT    NOT NULL,
+             name      TEXT    NOT NULL,
+             hidden    INTEGER NOT NULL DEFAULT 0,
+             locked    INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (source_id, kind, name)
+         ) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS meta (
              key   TEXT PRIMARY KEY,
              value TEXT NOT NULL
@@ -135,6 +143,22 @@ const CHANNEL_COLS: &str = "c.id, c.source_id, \
      c.name, c.logo, c.group_name, c.stream_url, \
      c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode, c.archive_days, \
      c.rating, c.year, c.added";
+
+/// SQL condition (on a channel aliased `c`) that leaves out rows in
+/// categories the viewer hid (`skip_hidden`) or locked (while locked).
+/// None when nothing needs leaving out.
+fn visibility_clause(skip_hidden: bool, unlocked: bool) -> Option<String> {
+    let cond = match (skip_hidden, unlocked) {
+        (false, true) => return None,
+        (true, true) => "gp.hidden = 1",
+        (false, false) => "gp.locked = 1",
+        (true, false) => "(gp.hidden = 1 OR gp.locked = 1)",
+    };
+    Some(format!(
+        "NOT EXISTS (SELECT 1 FROM group_prefs gp WHERE gp.source_id = c.source_id AND gp.kind = c.kind \
+           AND gp.name = COALESCE(NULLIF(c.group_name, ''), 'Uncategorized') AND {cond})"
+    ))
+}
 
 fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
@@ -562,10 +586,62 @@ pub fn list_groups(
             Ok(Group {
                 name: if name.is_empty() { "Uncategorized".into() } else { name },
                 count,
+                hidden: false,
+                locked: false,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    // Mark hidden / locked categories (any source, when showing all).
+    let mut prefs: HashMap<String, (bool, bool)> = HashMap::new();
+    let mut stmt = conn.prepare(
+        "SELECT name, MAX(hidden), MAX(locked) FROM group_prefs \
+          WHERE (?1 IS NULL OR source_id = ?1) AND (?2 IS NULL OR kind = ?2) GROUP BY name",
+    )?;
+    for row in stmt.query_map(params![source_id, kind], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0))
+    })? {
+        let (name, hidden, locked) = row?;
+        prefs.insert(name, (hidden, locked));
+    }
+    let rows = rows
+        .into_iter()
+        .map(|mut g| {
+            if let Some((hidden, locked)) = prefs.get(&g.name) {
+                g.hidden = *hidden;
+                g.locked = *locked;
+            }
+            g
+        })
+        .collect();
     Ok(rows)
+}
+
+/// Hide/show or lock/unlock categories. `None` leaves that flag as is.
+pub fn set_group_prefs(
+    db: &Db,
+    source_id: i64,
+    kind: &str,
+    names: &[String],
+    hidden: Option<bool>,
+    locked: Option<bool>,
+) -> Result<()> {
+    let mut conn = db.write();
+    let tx = conn.transaction()?;
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO group_prefs (source_id, kind, name, hidden, locked)
+             VALUES (?1, ?2, ?3, COALESCE(?4, 0), COALESCE(?5, 0))
+             ON CONFLICT (source_id, kind, name) DO UPDATE SET
+               hidden = COALESCE(?4, hidden), locked = COALESCE(?5, locked)",
+        )?;
+        for name in names {
+            stmt.execute(params![source_id, kind, name, hidden, locked])?;
+        }
+    }
+    tx.execute("DELETE FROM group_prefs WHERE hidden = 0 AND locked = 0", [])?;
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn list_channels(
@@ -573,9 +649,16 @@ pub fn list_channels(
     source_id: Option<i64>,
     group: Option<&str>,
     kind: Option<&str>,
+    unlocked: bool,
 ) -> Result<Vec<Channel>> {
     let conn = db.read();
     let mut sql = format!("SELECT {CHANNEL_COLS} FROM channels c WHERE c.parent_id IS NULL");
+    // A category picked by name shows even if hidden (that's how it's
+    // reviewed); "All" leaves hidden ones out. Locked ones need the PIN.
+    if let Some(clause) = visibility_clause(group.is_none(), unlocked) {
+        sql.push_str(" AND ");
+        sql.push_str(&clause);
+    }
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     if let Some(sid) = source_id {
         sql.push_str(" AND c.source_id = ?");
@@ -622,6 +705,7 @@ pub fn search_channels(
     q: &str,
     source_id: Option<i64>,
     kind: Option<&str>,
+    unlocked: bool,
 ) -> Result<Vec<Channel>> {
     let conn = db.read();
     // Escape LIKE wildcards so a search for "100%" means the literal text.
@@ -630,6 +714,10 @@ pub fn search_channels(
         "SELECT {CHANNEL_COLS} FROM channels c
           WHERE c.parent_id IS NULL AND c.name LIKE ? ESCAPE '\\' COLLATE NOCASE"
     );
+    if let Some(clause) = visibility_clause(true, unlocked) {
+        sql.push_str(" AND ");
+        sql.push_str(&clause);
+    }
     let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(format!("%{}%", escaped))];
     if let Some(sid) = source_id {
         sql.push_str(" AND c.source_id = ?");
@@ -651,13 +739,45 @@ pub fn search_channels(
     Ok(rows)
 }
 
+/// Newest movies or series by when the provider added them, for Home.
+pub fn recently_added(db: &Db, kind: &str, limit: i64, unlocked: bool) -> Result<Vec<Channel>> {
+    let conn = db.read();
+    let filter = visibility_clause(true, unlocked).map(|c| format!("AND {c}")).unwrap_or_default();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHANNEL_COLS} FROM channels c
+          WHERE c.parent_id IS NULL AND c.kind = ?1 AND c.added IS NOT NULL {filter}
+          ORDER BY c.added DESC LIMIT ?2"
+    ))?;
+    let rows = stmt
+        .query_map(params![kind, limit], row_to_channel)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Whether a channel (or an episode's show) sits in a locked category.
+pub fn is_locked(db: &Db, channel_id: i64) -> Result<bool> {
+    Ok(db
+        .read()
+        .query_row(
+            "SELECT 1 FROM channels c JOIN group_prefs gp ON gp.source_id = c.source_id AND gp.kind = c.kind
+               AND gp.name = COALESCE(NULLIF(c.group_name, ''), 'Uncategorized')
+             WHERE c.id = COALESCE((SELECT parent_id FROM channels WHERE id = ?1), ?1) AND gp.locked = 1",
+            [channel_id],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 // ---------- favorites ----------
 
-pub fn list_favorites(db: &Db) -> Result<Vec<Channel>> {
+pub fn list_favorites(db: &Db, unlocked: bool) -> Result<Vec<Channel>> {
     let conn = db.read();
+    let filter = visibility_clause(false, unlocked).map(|c| format!("WHERE {c}")).unwrap_or_default();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS}
            FROM favorites f JOIN channels c ON c.id = f.channel_id
+           {filter}
            ORDER BY f.added_at DESC"
     ))?;
     let rows = stmt
@@ -717,11 +837,13 @@ pub fn upsert_watch_progress(
     Ok(())
 }
 
-pub fn list_watch_history(db: &Db) -> Result<Vec<HistoryEntry>> {
+pub fn list_watch_history(db: &Db, unlocked: bool) -> Result<Vec<HistoryEntry>> {
     let conn = db.read();
+    let filter = visibility_clause(false, unlocked).map(|c| format!("WHERE {c}")).unwrap_or_default();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS}, h.time_pos, h.duration, h.watched_at, h.finished
            FROM watch_history h JOIN channels c ON c.id = h.channel_id
+           {filter}
            ORDER BY h.watched_at DESC"
     ))?;
     let rows = stmt
@@ -1027,7 +1149,7 @@ mod tests {
 
         // Episodes don't show up as top-level rows, and a playlist refresh
         // that still contains the show leaves them (and history) intact.
-        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 1);
+        assert_eq!(list_channels(&db, Some(sid), None, None, true).unwrap().len(), 1);
         let show_again = ChannelInsert { kind: "series".into(), container: true, ..ch("Show", "http://h/series/u/p/9") };
         replace_channels(&db, sid, ALL_KINDS, &[show_again]).unwrap();
         assert_eq!(list_episodes(&db, show_id).unwrap().len(), 2);
@@ -1073,7 +1195,7 @@ mod tests {
         };
         upsert_guide(&db, &guide).unwrap();
 
-        let rows = list_channels(&db, Some(sid), None, None).unwrap();
+        let rows = list_channels(&db, Some(sid), None, None, true).unwrap();
         let ids: Vec<Option<&str>> = rows.iter().map(|c| c.tvg_id.as_deref()).collect();
         assert_eq!(ids, vec![Some("svt1.se"), Some("kanal5.se"), None]);
         let now = now_playing(&db, &["SVT1.se".into()]).unwrap();
@@ -1093,10 +1215,10 @@ mod tests {
         replace_channels(&db, sid, ALL_KINDS, &many("c", 300, "live")).unwrap();
         // A truncated response: only 10 of 300 survive.
         assert!(replace_channels(&db, sid, ALL_KINDS, &many("c", 10, "live")).is_err());
-        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 300);
+        assert_eq!(list_channels(&db, Some(sid), None, None, true).unwrap().len(), 300);
         // A modest change still goes through.
         replace_channels(&db, sid, ALL_KINDS, &many("c", 250, "live")).unwrap();
-        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 250);
+        assert_eq!(list_channels(&db, Some(sid), None, None, true).unwrap().len(), 250);
     }
 
     #[test]
@@ -1108,7 +1230,7 @@ mod tests {
         replace_channels(&db, sid, ALL_KINDS, &all).unwrap();
         // The movie list failed to download this time: only live is synced.
         replace_channels(&db, sid, &["live"], &many("l", 5, "live")).unwrap();
-        assert_eq!(list_channels(&db, Some(sid), None, Some("movie")).unwrap().len(), 5);
+        assert_eq!(list_channels(&db, Some(sid), None, Some("movie"), true).unwrap().len(), 5);
     }
 
     #[test]
@@ -1141,9 +1263,9 @@ mod tests {
         replace_channels(&db, sid, ALL_KINDS, &[ch("C", "http://h/c"), ch("A2", "http://h/a")]).unwrap();
 
         assert_eq!(id_of(&db, "A2"), a, "existing channel keeps its id");
-        assert_eq!(list_favorites(&db).unwrap().len(), 1);
+        assert_eq!(list_favorites(&db, true).unwrap().len(), 1);
         assert!(get_watch_entry(&db, a).unwrap().is_some());
-        let names: Vec<String> = list_channels(&db, Some(sid), None, None)
+        let names: Vec<String> = list_channels(&db, Some(sid), None, None, true)
             .unwrap()
             .into_iter()
             .map(|c| c.name)
@@ -1162,7 +1284,7 @@ mod tests {
         replace_channels(&db, sid, ALL_KINDS, &[ch("M", "http://new.host:8080/movie/u/newpw/42.mkv")]).unwrap();
 
         assert_eq!(id_of(&db, "M"), m);
-        assert_eq!(list_favorites(&db).unwrap()[0].stream_url, "http://new.host:8080/movie/u/newpw/42.mkv");
+        assert_eq!(list_favorites(&db, true).unwrap()[0].stream_url, "http://new.host:8080/movie/u/newpw/42.mkv");
     }
 
     #[test]
@@ -1172,7 +1294,7 @@ mod tests {
         let list = [ch("A", "http://h/a"), ch("A again", "http://h/a")];
         replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
         replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
-        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 2);
+        assert_eq!(list_channels(&db, Some(sid), None, None, true).unwrap().len(), 2);
     }
 
     #[test]
@@ -1183,5 +1305,31 @@ mod tests {
         set_meta(&db, "installed_at", "123").unwrap();
         assert_eq!(installed_at(&db).unwrap(), 123);
         assert_eq!(get_meta(&db, "missing").unwrap(), None);
+    }
+
+    #[test]
+    fn hidden_and_locked_categories() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        let mk = |name: &str, group: &str| ChannelInsert { group: Some(group.into()), ..ch(name, &format!("http://h/{name}.ts")) };
+        replace_channels(&db, sid, ALL_KINDS, &[mk("A", "News"), mk("B", "Adult"), mk("C", "Japan")]).unwrap();
+        set_group_prefs(&db, sid, "live", &["Japan".into()], Some(true), None).unwrap();
+        set_group_prefs(&db, sid, "live", &["Adult".into()], None, Some(true)).unwrap();
+
+        let names = |v: Vec<Channel>| v.into_iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names(list_channels(&db, Some(sid), None, None, false).unwrap()), ["A"]);
+        assert_eq!(names(list_channels(&db, Some(sid), None, None, true).unwrap()), ["A", "B"]);
+        // A hidden category still opens by name; a locked one needs the PIN.
+        assert_eq!(names(list_channels(&db, Some(sid), Some("Japan"), None, false).unwrap()), ["C"]);
+        assert!(list_channels(&db, Some(sid), Some("Adult"), None, false).unwrap().is_empty());
+        assert!(search_channels(&db, "b", Some(sid), None, false).unwrap().is_empty());
+        let b = list_channels(&db, Some(sid), Some("Adult"), None, true).unwrap()[0].id;
+        assert!(is_locked(&db, b).unwrap());
+
+        let groups = list_groups(&db, Some(sid), Some("live")).unwrap();
+        let japan = groups.iter().find(|g| g.name == "Japan").unwrap();
+        assert!(japan.hidden && !japan.locked);
+        set_group_prefs(&db, sid, "live", &["Japan".into()], Some(false), None).unwrap();
+        assert_eq!(list_channels(&db, Some(sid), None, None, false).unwrap().len(), 2);
     }
 }

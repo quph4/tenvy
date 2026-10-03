@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod error;
 mod models;
+mod parental;
 mod players;
 mod remote;
 mod sources;
@@ -91,6 +92,13 @@ pub fn run() {
             commands::app_info,
             commands::get_channel,
             commands::open_licenses,
+            commands::set_group_prefs,
+            commands::parental_status,
+            commands::parental_unlock,
+            commands::parental_lock,
+            commands::set_parental_pin,
+            commands::recently_added,
+            commands::account_info,
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,

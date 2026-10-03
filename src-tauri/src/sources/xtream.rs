@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::db::ChannelInsert;
-use crate::models::VodDetails;
+use crate::models::{AccountInfo, VodDetails};
 use crate::err;
 use crate::error::Result;
 
@@ -102,6 +102,13 @@ impl Xtream {
             }
         }
         Ok(())
+    }
+
+    /// Subscription status, expiry and connection limits.
+    pub async fn account(&self) -> Result<AccountInfo> {
+        let v = self.get_json(None, &[]).await?;
+        let info = v.get("user_info").ok_or_else(|| err!("The provider didn't send account details."))?;
+        Ok(account_from(info))
     }
 
     /// Fetch live channels, movies and series. Live failing is fatal; VOD
@@ -517,6 +524,19 @@ fn string(v: &Value, key: &str) -> Option<String> {
     (!cleaned.is_empty()).then_some(cleaned)
 }
 
+/// `user_info` → AccountInfo. Panels send numbers as strings or numbers,
+/// and "null" / 0 for accounts without an expiry.
+pub fn account_from(info: &Value) -> AccountInfo {
+    AccountInfo {
+        status: string(info, "status"),
+        expires_at: int(info, "exp_date").filter(|t| *t > 0),
+        is_trial: int(info, "is_trial") == Some(1),
+        active_connections: int(info, "active_cons"),
+        max_connections: int(info, "max_connections"),
+        created_at: int(info, "created_at").filter(|t| *t > 0),
+    }
+}
+
 fn int(v: &Value, key: &str) -> Option<i64> {
     match v.get(key)? {
         Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
@@ -529,6 +549,20 @@ fn int(v: &Value, key: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn account_details() {
+        let v = json!({ "status": "Active", "exp_date": "1798761600", "is_trial": "0",
+                        "active_cons": "1", "max_connections": "2", "created_at": 1700000000 });
+        let a = account_from(&v);
+        assert_eq!(a.status.as_deref(), Some("Active"));
+        assert_eq!(a.expires_at, Some(1798761600));
+        assert!(!a.is_trial);
+        assert_eq!((a.active_connections, a.max_connections), (Some(1), Some(2)));
+        let a = account_from(&json!({ "exp_date": null, "is_trial": 1 }));
+        assert_eq!(a.expires_at, None);
+        assert!(a.is_trial);
+    }
 
     #[test]
     fn tolerant_field_access() {

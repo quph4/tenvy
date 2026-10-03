@@ -4,6 +4,8 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ipc } from '../lib/ipc'
 import { enterMiniWindow, exitMiniWindow } from '../lib/miniWindow'
 import { isResumable, useHistory } from './history'
+import { usePlaylist } from './playlist'
+import { useUI } from './ui'
 
 /**
  * Playback state for the embedded mpv renderer.
@@ -127,7 +129,13 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   // Reset probed track prefs on channel change — they're per-file. We also
   // clear the mpv mirror so the UI doesn't flash the outgoing file's
   // duration/position while the new load happens.
-  play: (ch, startSeconds = null) =>
+  play: (ch, startSeconds = null) => {
+    // Show the player for it: leave Home, and switch to the matching tab
+    // (a live channel picked from search while in Movies, say).
+    const ui = useUI.getState()
+    if (ui.view === 'home') ui.setView('player')
+    const pl = usePlaylist.getState()
+    if (pl.activeKind !== ch.kind) pl.setActiveKind(ch.kind).catch(() => {})
     set((s) => ({
       playNonce: s.playNonce + 1,
       catchup: null,
@@ -144,7 +152,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       currentSubtitle: null,
       preferredAudioTrack: null,
       preferredSubtitleTrack: null,
-    })),
+    }))
+  },
 
   playCatchup: (ch, programme) => {
     get().play(ch, null)

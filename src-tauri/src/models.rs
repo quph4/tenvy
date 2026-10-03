@@ -116,6 +116,35 @@ pub struct Programme {
 pub struct Group {
     pub name: String,
     pub count: i64,
+    /// Hidden by the viewer: left out of lists, "All" and search.
+    #[serde(default)]
+    pub hidden: bool,
+    /// Behind the parental PIN.
+    #[serde(default)]
+    pub locked: bool,
+}
+
+/// An Xtream account's subscription details (never the password).
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountInfo {
+    /// "Active", "Expired", "Banned", "Disabled"…
+    pub status: Option<String>,
+    /// Epoch seconds; None for accounts that never expire.
+    pub expires_at: Option<i64>,
+    pub is_trial: bool,
+    pub active_connections: Option<i64>,
+    pub max_connections: Option<i64>,
+    pub created_at: Option<i64>,
+}
+
+/// Parental lock state for the UI.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentalStatus {
+    pub pin_set: bool,
+    /// Locked categories are visible right now (no PIN, or unlocked).
+    pub unlocked: bool,
 }
 
 /// A channel the user has watched, plus the progress we've saved. The
