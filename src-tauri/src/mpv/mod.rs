@@ -135,7 +135,12 @@ impl Mpv {
         })?;
 
         let mut cmd = std::process::Command::new(&mpv_path);
-        cmd.arg(format!("--wid={}", hwnd))
+        // Ignore the user's own mpv.conf / input.conf / scripts: a
+        // personal config (a different vo, an OSC replacement, key
+        // bindings) must not change how the embedded player behaves.
+        // Everything we rely on is passed explicitly below.
+        cmd.arg("--no-config")
+            .arg(format!("--wid={}", hwnd))
             .arg(format!("--input-ipc-server={}", pipe_name))
             .arg(format!("--volume={}", audio.volume.clamp(0.0, 100.0)))
             .arg(format!("--mute={}", if audio.muted { "yes" } else { "no" }));

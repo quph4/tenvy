@@ -1,21 +1,19 @@
 # Lumen
 
 Lightweight Windows IPTV player — Tauri 2 + React + TypeScript. TiviMate-style
-grid EPG, M3U / Xtream / XMLTV sources, and embedded mpv for playback so every
-codec (HEVC, AC-3, DTS, PGS subs, MKV alternate audio) Just Works.
+grid EPG, M3U / Xtream Codes / XMLTV sources, and embedded mpv for playback so
+every codec (HEVC, AC-3, DTS, PGS subs, MKV alternate audio) Just Works.
+
+Lumen is a player only: it ships no channels or content. Users bring their own
+playlist from their own provider.
 
 ## Requirements
 
 - **Windows 10/11.** Linux/macOS builds compile but the embedded player is
   Windows-only right now.
-- **mpv.exe on PATH.** Lumen spawns mpv as a child process and parents it
-  into a native HWND inside the Tauri window. We look in this order:
-    1. `PATH`
-    2. `C:\Program Files\mpv\mpv.exe`
-    3. `%APPDATA%\mpv\mpv.exe`
-  Install from https://mpv.io/installation/ (the
-  [shinchiro](https://github.com/shinchiro/mpv-winbuild-cmake) Windows builds
-  are recommended) and make sure `mpv --version` runs in a terminal.
+- **mpv** is bundled in the installer (`resources/mpv/`). Dev builds without
+  it fall back to a system install (Program Files, `%LOCALAPPDATA%\mpv`,
+  then `PATH`).
 
 ## Dev
 
@@ -24,20 +22,41 @@ pnpm install
 pnpm tauri dev
 ```
 
+Set `LUMEN_MPV_LOG=1` to make release builds write `%TEMP%\lumen-mpv.log`
+(debug builds always do), and `LUMEN_HWDEC=no` to rule out hardware decoding.
+
+## Test
+
+```
+cd src-tauri && cargo test --lib
+pnpm build        # type-checks the frontend
+```
+
 ## Build
 
 ```
+powershell -ExecutionPolicy Bypass -File scripts/fetch-mpv.ps1
 pnpm tauri build
 ```
 
-Ships an MSI under 15 MB. mpv is **not** bundled — it's a user install.
+Produces a per-user NSIS installer (no admin prompt) under
+`src-tauri/target/release/bundle/nsis/`. The version comes from `package.json`.
 
 ## Architecture notes
 
-- `src-tauri/src/mpv/` — subprocess wrapper, JSON IPC over a named pipe, and
-  the native child-HWND plumbing.
+- `src-tauri/src/mpv/` — subprocess wrapper, JSON IPC over a named pipe, the
+  native child-HWND plumbing, and a kill-on-close job object so mpv never
+  outlives the app.
 - `src-tauri/src/commands/mpv_state.rs` — Tauri command surface; emits
-  `mpv://state` events on every observed-property change.
+  `mpv://state` on observed-property changes (position throttled to 4 Hz)
+  and respawns mpv if it dies.
+- `src-tauri/src/sources/` — M3U, Xtream Codes and XMLTV ingest, plus
+  `stream_url.rs`, which validates provider URLs before they reach a player
+  and redacts credentials from logs.
+- `src-tauri/src/db/` — SQLite. Refreshes update channel rows in place
+  (keyed on a stable identity) so favorites and watch history survive.
+  Xtream series are container rows whose episodes load on demand.
 - `src/components/Player/` — geometry-reporting div + docked control strip.
   The video is a native Windows HWND painted on top of WebView2; any UI that
-  overlaps it would be invisible, so controls dock below as a sibling.
+  overlaps it would be invisible, so controls dock below as a sibling and
+  the HWND is hidden while a modal is open (`hooks/useVideoObscured.ts`).

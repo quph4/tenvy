@@ -30,3 +30,7 @@ dist-ssr
 /*.png
 lumen.err.log
 lumen.out.log
+
+# Bundled mpv binaries are fetched, not committed (see resources/mpv/README.md)
+/src-tauri/resources/mpv/*
+!/src-tauri/resources/mpv/README.md
