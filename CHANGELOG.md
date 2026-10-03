@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Catch-up: watch programmes that already aired from the guide (on
+  channels your provider archives), and "Start over" on what's on now.
+- Guide paging a week back and forward.
+- Mini player (P): a small always-on-top window in the corner.
 - Xtream Codes: movies, series (episodes load when a show is opened) and
   the provider's programme guide are imported, not just live channels.
 - Search (Ctrl+K) covers the whole library — channels, movies and series —
