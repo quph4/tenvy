@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Movie and series library: poster grid with ratings and progress,
+  details pages (plot, cast, trailer, resume), seasons and episodes with
+  "Continue", and a full-width player.
+- Champagne-on-graphite look and a new app icon.
 - Catch-up: watch programmes that already aired from the guide (on
   channels your provider archives), and "Start over" on what's on now.
 - Guide paging a week back and forward.
