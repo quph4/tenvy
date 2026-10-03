@@ -1,4 +1,4 @@
-import { Bell, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
+import { Bell, Heart, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
 import { usePlaylist } from '../../stores/playlist'
 import { useIngest } from '../../stores/ingest'
@@ -6,6 +6,7 @@ import { ipc } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
 import { useUpdater } from '../../stores/updater'
 import { useReminders } from '../../stores/reminders'
+import { openSupportLink, useAppInfo } from '../../stores/appInfo'
 import { hhmm, weekday } from '../../lib/time'
 
 export function SettingsPanel() {
@@ -120,6 +121,7 @@ function AboutSection() {
   const status = useUpdater((s) => s.status)
   const checkForUpdates = useUpdater((s) => s.checkForUpdates)
   const install = useUpdater((s) => s.install)
+  const support = useAppInfo((s) => s.info?.config.support ?? null)
 
   const line =
     status.kind === 'checking'
@@ -159,6 +161,20 @@ function AboutSection() {
           </button>
         )}
       </div>
+      {support && (
+        <div className="mt-4 flex items-center gap-3 rounded-lg border border-accent-500/20 bg-accent-400/5 px-3 py-2.5">
+          <Heart className="h-4 w-4 shrink-0 text-accent-400" />
+          <div className="min-w-0 flex-1 text-xs leading-relaxed text-neutral-400">
+            Tenvy is free. If you enjoy it, you can support its development.
+          </div>
+          <button
+            onClick={openSupportLink}
+            className="inline-flex h-7 shrink-0 items-center rounded-md bg-accent-400 px-2.5 text-xs font-semibold text-neutral-950 hover:bg-accent-300"
+          >
+            {support.label ?? 'Support Tenvy'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -25,6 +25,17 @@ pnpm tauri dev
 Set `TENVY_MPV_LOG=1` to make release builds write `%TEMP%\tenvy-mpv.log`
 (debug builds always do), and `TENVY_HWDEC=no` to rule out hardware decoding.
 
+### Demo mode (screenshots)
+
+`pnpm dev`, then open `http://localhost:1420/?demo` in a browser: the
+backend is replaced by made-up channels, films, series and a guide
+(`src/demo/mock.ts`, never part of a build). `&scene=welcome|guide|movies|
+series|details|show|live` jumps to a screen; for crisp 2x captures:
+
+```
+chrome --headless=new --hide-scrollbars --force-device-scale-factor=2 --window-size=1440,900 --virtual-time-budget=6000 --screenshot=guide.png "http://localhost:1420/?demo&scene=guide"
+```
+
 ## Test
 
 ```

@@ -20,8 +20,10 @@ import { attachIngestListener } from './stores/ingest'
 import { attachGuideListener } from './stores/nowPlaying'
 import { startUpdateChecks } from './stores/updater'
 import { startReminderScheduler } from './stores/reminders'
+import { openSupportLink, startAppInfo, useAppInfo } from './stores/appInfo'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
 import { subscribe } from './lib/ipc'
+import { Heart } from 'lucide-react'
 
 function App() {
   const { sources, hydrate, activeKind } = usePlaylist()
@@ -60,6 +62,8 @@ function App() {
 
   useEffect(() => startUpdateChecks(), [])
   useEffect(() => startReminderScheduler(), [])
+  useEffect(() => startAppInfo(), [])
+  const support = useAppInfo((s) => s.info?.config.support ?? null)
 
   useKeyboardShortcuts()
 
@@ -112,7 +116,18 @@ function App() {
           <span className="kbd mr-1">P</span>
           Mini player
         </span>
-        <span className="ml-auto tabular-nums text-neutral-600">Tenvy · {__APP_VERSION__}</span>
+        {support && (
+          <button
+            onClick={openSupportLink}
+            className="ml-auto inline-flex items-center gap-1 text-neutral-500 transition-colors hover:text-accent-300"
+          >
+            <Heart className="h-3 w-3" />
+            {support.label ?? 'Support Tenvy'}
+          </button>
+        )}
+        <span className={support ? 'tabular-nums text-neutral-600' : 'ml-auto tabular-nums text-neutral-600'}>
+          Tenvy · {__APP_VERSION__}
+        </span>
       </footer>}
 
       <SearchPalette />

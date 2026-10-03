@@ -68,6 +68,42 @@ The first fetches mpv if missing and builds a signed installer; the second
 drafts the release in `quph4/tenvy-releases` (add `-Publish` to publish
 directly).
 
+## Website and remote config
+
+`quph4/tenvy-releases` is also the website (GitHub Pages, served from
+`main`): <https://quph4.github.io/tenvy-releases/>. `index.html` is the
+landing page, `assets/` its screenshots (made with the demo mode, see
+README), and `README.md` the presentation on GitHub.
+
+`config.json` there is read by every installed Tenvy at startup and twice
+a day (cached for offline use). Edit it on GitHub — no release needed;
+changes reach users within about ten minutes.
+
+```json
+{
+  "model": "free",
+  "support": { "url": "https://ko-fi.com/…", "label": "Support Tenvy", "message": "Optional prompt text" },
+  "supportPrompt": { "afterDays": 7, "everyDays": 45 },
+  "announcements": [
+    { "id": "2026-11-hello", "text": "Short message", "url": "https://…", "minVersion": "0.1.0", "maxVersion": "0.3.0" }
+  ]
+}
+```
+
+- `support`: shows "Support Tenvy" in the footer, Settings → About and on
+  the website. `null` hides it everywhere. https links only.
+- `supportPrompt`: at most one gentle prompt every `everyDays`, starting
+  `afterDays` after install, and only for people who have watched
+  something. Remove it to never prompt.
+- `announcements`: each shown once per install, optionally only to a
+  version range. Give every new message a new `id`.
+- `model`: this version knows only `"free"` and treats anything else as
+  free. A paid model or trial needs a new app version that understands
+  it; the install date the app records lets that version treat existing
+  users differently (e.g. keep early users free).
+
+Everything fails open: a broken or missing file means free, no prompts.
+
 ## Before the first public release
 
 - `productName` and `identifier` (`app.tenvy.player`) in `tauri.conf.json`

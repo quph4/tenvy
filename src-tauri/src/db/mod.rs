@@ -103,6 +103,10 @@ fn migrate(conn: &Connection) -> Result<()> {
              name_key TEXT NOT NULL,
              id       TEXT NOT NULL,
              PRIMARY KEY (name_key, id)
+         ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS meta (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
          ) WITHOUT ROWID;",
     )?;
 
@@ -852,6 +856,36 @@ pub fn source_stats(db: &Db, source_id: i64) -> Result<SourceStats> {
     Ok(stats)
 }
 
+// ---------- app meta ----------
+
+/// When Tenvy was first started on this PC (epoch seconds). Recorded on
+/// the first call, so for installs older than this feature it's the
+/// first launch after updating.
+pub fn installed_at(db: &Db) -> Result<i64> {
+    let conn = db.write();
+    conn.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES ('installed_at', CAST(unixepoch() AS TEXT))",
+        [],
+    )?;
+    let v: String = conn.query_row("SELECT value FROM meta WHERE key = 'installed_at'", [], |r| r.get(0))?;
+    Ok(v.parse().unwrap_or(0))
+}
+
+pub fn get_meta(db: &Db, key: &str) -> Result<Option<String>> {
+    Ok(db
+        .read()
+        .query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+        .optional()?)
+}
+
+pub fn set_meta(db: &Db, key: &str, value: &str) -> Result<()> {
+    db.write().execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
 // ---------- programmes ----------
 
 /// Store a parsed guide: its programmes, and its channel display names for
@@ -1139,5 +1173,15 @@ mod tests {
         replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
         replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
         assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn installed_at_is_recorded_once() {
+        let db = test_db();
+        let first = installed_at(&db).unwrap();
+        assert!(first > 1_700_000_000);
+        set_meta(&db, "installed_at", "123").unwrap();
+        assert_eq!(installed_at(&db).unwrap(), 123);
+        assert_eq!(get_meta(&db, "missing").unwrap(), None);
     }
 }

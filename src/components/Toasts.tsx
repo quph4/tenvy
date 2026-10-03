@@ -1,4 +1,4 @@
-import { AlertCircle, Bell, CheckCircle2, Info, X } from 'lucide-react'
+import { AlertCircle, Bell, CheckCircle2, Heart, Info, X } from 'lucide-react'
 import { useToast } from '../stores/toast'
 import { cn } from '../lib/cn'
 
@@ -15,7 +15,7 @@ export function Toasts() {
             t.kind === 'success' && 'border-emerald-500/30 bg-emerald-950/80 text-emerald-100',
             t.kind === 'error' && 'border-red-500/30 bg-red-950/80 text-red-100',
             t.kind === 'info' && 'border-neutral-700 bg-neutral-900/90 text-neutral-100',
-            t.kind === 'reminder' && 'border-accent-500/40 bg-neutral-900/95 text-neutral-100',
+            (t.kind === 'reminder' || t.kind === 'support') && 'border-accent-500/40 bg-neutral-900/95 text-neutral-100',
           )}
         >
           <span className="mt-0.5 shrink-0">
@@ -23,6 +23,7 @@ export function Toasts() {
             {t.kind === 'error' && <AlertCircle className="h-4 w-4 text-red-400" />}
             {t.kind === 'info' && <Info className="h-4 w-4 text-neutral-400" />}
             {t.kind === 'reminder' && <Bell className="h-4 w-4 text-accent-400" />}
+            {t.kind === 'support' && <Heart className="h-4 w-4 text-accent-400" />}
           </span>
           <span className="line-clamp-3">{t.message}</span>
           {t.action && (

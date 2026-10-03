@@ -7,6 +7,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::db::{self, Db};
 use crate::err;
+use crate::remote;
 use crate::error::Result;
 use crate::models::{
     AddSourceReq, Channel, Group, HistoryEntry, HistoryProgress, PlaylistProgress, Programme,
@@ -415,6 +416,46 @@ pub async fn list_reminders(state: State<'_, AppState>) -> Result<Vec<Reminder>>
 pub async fn source_stats(state: State<'_, AppState>, id: i64) -> Result<SourceStats> {
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || db::source_stats(&db, id)).await?
+}
+
+// ---------- app info ----------
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppInfo {
+    /// First launch on this PC, epoch seconds.
+    pub installed_at: i64,
+    pub config: remote::RemoteConfig,
+}
+
+/// Install date plus the remote config: fetched fresh when possible,
+/// otherwise the last copy that was fetched, otherwise the defaults.
+#[tauri::command]
+pub async fn app_info(state: State<'_, AppState>) -> Result<AppInfo> {
+    let db = state.db.clone();
+    let installed_at = tokio::task::spawn_blocking(move || db::installed_at(&db)).await??;
+
+    let config = match remote::fetch(&state.http).await {
+        Ok(config) => {
+            if let Ok(json) = serde_json::to_string(&config) {
+                let db = state.db.clone();
+                let _ = tokio::task::spawn_blocking(move || db::set_meta(&db, "remote_config", &json)).await;
+            }
+            config
+        }
+        Err(e) => {
+            tracing::info!("remote config unavailable, using cached copy: {e}");
+            let db = state.db.clone();
+            tokio::task::spawn_blocking(move || db::get_meta(&db, "remote_config"))
+                .await?
+                .ok()
+                .flatten()
+                .and_then(|json| serde_json::from_str(&json).ok())
+                .unwrap_or_default()
+        }
+    };
+
+    Ok(AppInfo { installed_at, config: config.sanitized(env!("CARGO_PKG_VERSION")) })
 }
 
 // ---------- channels ----------

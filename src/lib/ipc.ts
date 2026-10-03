@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
+  AppInfo,
   Channel,
   ChannelKind,
   Group,
@@ -76,6 +77,10 @@ export const ipc = {
   },
   async sourceStats(id: number): Promise<SourceStats> {
     return invoke('source_stats', { id })
+  },
+  /** Install date and the remote config (cached copy when offline). */
+  async appInfo(): Promise<AppInfo> {
+    return invoke('app_info')
   },
   /** Plot, cast, artwork and trailer for a movie or series (cached). */
   async vodDetails(channelId: number): Promise<VodDetails> {

@@ -135,3 +135,17 @@ export interface HistoryProgress {
   watchedAt: number
   finished: boolean
 }
+
+/** Settings read from the web at startup (see src-tauri/src/remote.rs). */
+export interface RemoteConfig {
+  model: string
+  support: { url: string; label: string | null; message: string | null } | null
+  supportPrompt: { afterDays: number; everyDays: number } | null
+  announcements: { id: string; text: string; url: string | null }[]
+}
+
+export interface AppInfo {
+  /** First launch on this PC, epoch seconds. */
+  installedAt: number
+  config: RemoteConfig
+}

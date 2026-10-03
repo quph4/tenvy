@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Tenvy is free. "Support Tenvy" (footer and Settings → About) and an
+  occasional, gentle prompt once you've used it for a while; both, and
+  short announcements, are controlled from the website without an update.
 - Reminders: "Remind me" on upcoming programmes in the guide (and on
   what's next under the player); a Windows notification and a "Watch now"
   prompt just before it starts. Programme cards in the guide.

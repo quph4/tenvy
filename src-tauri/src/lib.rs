@@ -3,6 +3,7 @@ mod db;
 mod error;
 mod models;
 mod players;
+mod remote;
 mod sources;
 
 #[cfg(windows)]
@@ -87,6 +88,7 @@ pub fn run() {
             commands::remove_reminder,
             commands::list_reminders,
             commands::source_stats,
+            commands::app_info,
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,
