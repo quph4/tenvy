@@ -96,8 +96,13 @@ impl RemoteConfig {
 /// Fetch the config. Errors (offline, 404, bad JSON) are the caller's to
 /// fall back from.
 pub async fn fetch(http: &reqwest::Client) -> crate::error::Result<RemoteConfig> {
+    // Development builds can read it from elsewhere (the test provider).
+    let url = std::env::var("TENVY_CONFIG_URL")
+        .ok()
+        .filter(|_| cfg!(debug_assertions))
+        .unwrap_or_else(|| CONFIG_URL.to_string());
     let body = http
-        .get(CONFIG_URL)
+        .get(url)
         .timeout(Duration::from_secs(8))
         .send()
         .await?

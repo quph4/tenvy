@@ -35,29 +35,44 @@ interface HistoryState {
   clear(): Promise<void>
 }
 
+// Saves and removals made while a load is in flight would be undone by its
+// (older) answer; count them, and reload instead of applying stale data.
+let writes = 0
+let entriesTicket = 0
+let progressTicket = 0
+
 export const useHistory = create<HistoryState>((set, get) => ({
   entries: [],
   loading: false,
   progress: new Map(),
 
   async loadEntries() {
+    const ticket = ++entriesTicket
+    const w = writes
     set({ loading: true })
     try {
       const entries = await ipc.listHistory()
+      if (ticket !== entriesTicket) return
+      if (w !== writes) return get().loadEntries()
       set({ entries })
     } finally {
-      set({ loading: false })
+      if (ticket === entriesTicket) set({ loading: false })
     }
   },
 
   async loadProgress() {
+    const ticket = ++progressTicket
+    const w = writes
     const rows = await ipc.listHistoryProgress()
+    if (ticket !== progressTicket) return
+    if (w !== writes) return get().loadProgress()
     const next = new Map<number, HistoryProgress>()
     for (const r of rows) next.set(r.channelId, r)
     set({ progress: next })
   },
 
   async record(channelId, timePos, duration, finished) {
+    writes++
     await ipc.recordHistory({ channelId, timePos, duration, finished })
     const next = new Map(get().progress)
     const prev = next.get(channelId)
@@ -73,6 +88,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   },
 
   async remove(channelId) {
+    writes++
     await ipc.removeHistoryEntry(channelId)
     const next = new Map(get().progress)
     next.delete(channelId)
@@ -83,6 +99,7 @@ export const useHistory = create<HistoryState>((set, get) => ({
   },
 
   async clear() {
+    writes++
     await ipc.clearHistory()
     set({ progress: new Map(), entries: [] })
   },

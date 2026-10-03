@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ipc } from '../lib/ipc'
 import type { AccountInfo, Source } from '../types'
 import { useToast } from './toast'
+import { usePlaylist } from './playlist'
 
 /**
  * Subscription details per Xtream source (status, expiry, connections),
@@ -23,6 +24,8 @@ export const useAccounts = create<AccountsState>((set, get) => ({
     if (source.kind !== 'xtream') return
     try {
       const info = await ipc.accountInfo(source.id)
+      // The provider may have been removed while we asked.
+      if (!usePlaylist.getState().sources.some((s) => s.id === source.id)) return
       set({ bySource: { ...get().bySource, [source.id]: info } })
     } catch {
       /* offline or the panel is down — keep what we had */

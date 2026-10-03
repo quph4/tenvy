@@ -56,6 +56,21 @@ $env:TENVY_DATA_DIR = "$env:TEMP\tenvy-test"; $env:WEBVIEW2_USER_DATA_FOLDER = "
 (`TENVY_DATA_DIR` only works in development builds.) Then connect with
 `http://127.0.0.1:8788/get.php?username=test&password=test`.
 
+### End-to-end tests
+
+`pnpm e2e` starts the test provider and a dev build of Tenvy against a
+fresh, separate library (sound forced off with `TENVY_MUTE`), then drives
+the app through 26 scenarios: first run, Home, live playback and zapping,
+the guide and catch-up, reminders, search, film resume, series, several
+audio tracks, fast tab switching with slow answers, playback rules,
+picture & sound, sleep timer, mini player and fullscreen, favorites,
+hidden and locked categories, a second (M3U) provider, start with the
+last channel, an mpv crash, starting offline, and dropped/stalled
+streams. After every test it also checks that the app agrees with itself
+(categories match the tab, lists hold the right content). Run it before
+each release. `pnpm e2e Guide` runs only matching tests (plus setup);
+results and screenshots of failures land in `scripts/e2e/out/`.
+
 ### Demo video
 
 `scripts/demo-video` records a ~40 s walkthrough of the demo mode (cursor,

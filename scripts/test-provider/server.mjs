@@ -93,6 +93,9 @@ const MOVIES = [
   { id: 203, name: 'Color Bars Forever (2024)', cat: '11', rating: '8.1', year: 2024 },
   { id: 204, name: 'One Kilohertz (1999)', cat: '12', rating: '7.0', year: 1999 },
   { id: 205, name: 'Buffering (2023)', cat: '12', rating: '5.9', year: 2023 },
+  // Several audio languages and subtitles: a public test stream (Tears of
+  // Steel, CC BY) from Unified Streaming, played straight from them.
+  { id: 206, name: 'Tears of Steel (2012)', cat: '12', rating: '6.5', year: 2012, remote: 'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8' },
 ]
 const SERIES_CATS = [{ id: '21', name: 'Test Series' }]
 const SERIES = [
@@ -317,6 +320,11 @@ function stream(req, res, kind, parts) {
     console.log(`  refused: ${streams.size}/${state.max} connections in use`)
     return json(res, { error: 'max connections reached' }, 403)
   }
+  const remote = kind === 'movie' && MOVIES.find((m) => String(m.id) === parts[2])?.remote
+  if (remote) {
+    res.writeHead(302, { location: remote })
+    return res.end()
+  }
   streams.add(res)
   res.on('close', () => streams.delete(res))
   if (kind === 'live') return streamLive(req, res)
@@ -362,6 +370,27 @@ createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/xml' })
     return res.end(xmltv())
   }
+  if (p === '/config.json') {
+    // What the app reads at startup (TENVY_CONFIG_URL), for testing the
+    // support link, the support prompt and announcements.
+    return json(res, {
+      model: 'free',
+      support: { url: 'https://example.org/support-tenvy', label: 'Support Tenvy', message: 'Test prompt from the test provider.' },
+      supportPrompt: { afterDays: 0, everyDays: 1 },
+      announcements: [{ id: `e2e-${T0}`, text: 'Hello from the test provider.', url: null }],
+    })
+  }
+  if (p === '/playlist.m3u') {
+    // A plain M3U playlist (not get.php), to test non-Xtream sources.
+    res.writeHead(200, { 'content-type': 'audio/x-mpegurl' })
+    let m3u = `#EXTM3U url-tvg="${HOST}/xmltv.php?username=${USER}&password=${PASS}"
+`
+    for (const c of LIVE.slice(1, 5))
+      m3u += `#EXTINF:-1 tvg-id="test.${c.id}" tvg-logo="${HOST}/img/logo/${c.id}.svg" group-title="M3U ${LIVE_CATS.find((x) => x.id === c.cat).name}",M3U ${c.name}
+${HOST}/live/${USER}/${PASS}/${c.id}.ts
+`
+    return res.end(m3u)
+  }
   if (p === '/get.php') {
     res.writeHead(200, { 'content-type': 'audio/x-mpegurl' })
     let m3u = `#EXTM3U url-tvg="${HOST}/xmltv.php?username=${USER}&password=${PASS}"\n`
@@ -370,7 +399,7 @@ createServer((req, res) => {
     return res.end(m3u)
   }
   const m = /^\/(live|movie|series)\/([^/]+)\/([^/]+)\/(\d+)\.\w+$/.exec(p)
-  if (m) return stream(req, res, m[1], [m[2], m[3]])
+  if (m) return stream(req, res, m[1], [m[2], m[3], m[4]])
   const ts = /^\/timeshift\/([^/]+)\/([^/]+)\/(\d+)\/([^/]+)\/(\d+)\.\w+$/.exec(p)
   if (ts) return stream(req, res, 'timeshift', [ts[1], ts[2]])
 

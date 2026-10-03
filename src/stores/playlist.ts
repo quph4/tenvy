@@ -34,6 +34,13 @@ interface PlaylistState {
 export const FAVORITES_GROUP = '__favorites'
 export const HISTORY_GROUP = '__history'
 
+// Lists load asynchronously, and the viewer (or playback) can switch tab,
+// category or provider before an answer arrives. Every load takes a
+// ticket; only the newest ticket's answer is applied, so a slow reply for
+// the previous tab can never overwrite the current one.
+let groupsTicket = 0
+let channelsTicket = 0
+
 export const usePlaylist = create<PlaylistState>((set, get) => ({
   sources: [],
   activeSourceId: null,
@@ -51,29 +58,22 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
     const current = get().activeSourceId
     const activeSourceId = sources.some((s) => s.id === current) ? current : sources[0]?.id ?? null
     set({ sources, activeSourceId })
-    const { activeKind } = get()
-    const groups = await ipc.listGroups(activeSourceId, activeKind)
-    set({ groups })
-    await get().refreshChannels()
+    await Promise.all([loadGroups(), get().refreshChannels()])
   },
 
   async setActiveSource(id) {
     set({ activeSourceId: id, activeGroup: null, selected: null })
-    const { activeKind } = get()
-    const groups = await ipc.listGroups(id, activeKind)
-    set({ groups })
-    await get().refreshChannels()
+    await Promise.all([loadGroups(), get().refreshChannels()])
   },
 
   async setActiveKind(kind) {
     if (get().activeKind === kind) return
-    set({ activeKind: kind, activeGroup: null, selected: null })
+    // Clear the old tab's lists at once rather than showing them under the
+    // new tab until the new ones arrive.
+    set({ activeKind: kind, activeGroup: null, selected: null, groups: [], channels: [] })
     // The guide is for live TV; films and series open in the library.
     if (kind !== 'live' && useUI.getState().view === 'epg') useUI.getState().setView('player')
-    const { activeSourceId } = get()
-    const groups = await ipc.listGroups(activeSourceId, kind)
-    set({ groups })
-    await get().refreshChannels()
+    await Promise.all([loadGroups(), get().refreshChannels()])
   },
 
   async setActiveGroup(group) {
@@ -97,6 +97,7 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
 
   async refreshChannels() {
     const { activeSourceId, activeGroup, activeKind } = get()
+    const ticket = ++channelsTicket
     set({ loadingChannels: true })
     try {
       let channels: Channel[]
@@ -117,9 +118,17 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
           kind: activeKind,
         })
       }
-      set({ channels })
+      if (ticket === channelsTicket) set({ channels })
     } finally {
-      set({ loadingChannels: false })
+      if (ticket === channelsTicket) set({ loadingChannels: false })
     }
   },
 }))
+
+/** Categories for the current provider and tab (newest request wins). */
+async function loadGroups() {
+  const { activeSourceId, activeKind } = usePlaylist.getState()
+  const ticket = ++groupsTicket
+  const groups = await ipc.listGroups(activeSourceId, activeKind)
+  if (ticket === groupsTicket) usePlaylist.setState({ groups })
+}

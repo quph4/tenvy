@@ -8,7 +8,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test-provider": "node scripts/test-provider/server.mjs"
+    "test-provider": "node scripts/test-provider/server.mjs",
+    "e2e": "node scripts/e2e/run.mjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

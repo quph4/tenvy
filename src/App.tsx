@@ -88,6 +88,27 @@ function App() {
   useEffect(() => startToastMirror(), [])
   const support = useAppInfo((s) => s.info?.config.support ?? null)
 
+  // Nothing plays where you can't see it. Going to Movies or Shows from
+  // live TV stops the channel (otherwise its sound carries on behind the
+  // library, holding the provider's connection) — the mini player is the
+  // way to keep it on. And opening another title's page while a film
+  // plays stops the film (its position is saved) so the page shows.
+  const selected = usePlaylist((s) => s.selected)
+  useEffect(() => {
+    const pb = usePlayback.getState()
+    if (activeKind !== 'live' && pb.channel?.kind === 'live' && !pb.mini) {
+      pb.stop()
+      ipc.mpvStop().catch(() => {})
+    }
+  }, [activeKind])
+  useEffect(() => {
+    const pb = usePlayback.getState()
+    if (selected && pb.channel && pb.channel.kind !== 'live' && !pb.mini) {
+      pb.stop()
+      ipc.mpvStop().catch(() => {})
+    }
+  }, [selected])
+
   useKeyboardShortcuts()
 
   return (

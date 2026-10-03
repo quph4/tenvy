@@ -46,6 +46,8 @@ The code lives in the private repo `quph4/tenvy`; installers and
 
 ## Cutting a release
 
+Run `pnpm e2e` first; every test should pass.
+
 1. Bump `version` in `package.json` (the app, installer and updater read
    it from there) and in `src-tauri/Cargo.toml`.
 2. Add a `## <version>` section to `CHANGELOG.md` — it becomes the release

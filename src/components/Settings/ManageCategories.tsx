@@ -1,5 +1,5 @@
 import { Eye, EyeOff, Lock, LockOpen, Search, X } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ipc } from '../../lib/ipc'
 import { cn } from '../../lib/cn'
 import { useParental } from '../../stores/parental'
@@ -41,9 +41,16 @@ function Dialog() {
   // all are shown together.
   const sourceIds = activeSourceId != null ? [activeSourceId] : sources.map((s) => s.id)
 
-  const load = async () => setGroups(await ipc.listGroups(activeSourceId, kind))
+  // Only the newest request's answer is shown (switching Live → Movies
+  // fast must not leave Live categories under the Movies tab).
+  const ticket = useRef(0)
+  const load = async () => {
+    const mine = ++ticket.current
+    const list = await ipc.listGroups(activeSourceId, kind).catch(() => [])
+    if (mine === ticket.current) setGroups(list)
+  }
   useEffect(() => {
-    load().catch(() => setGroups([]))
+    load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, activeSourceId])
 

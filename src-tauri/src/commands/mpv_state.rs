@@ -87,6 +87,12 @@ fn clean_lang(s: &str) -> Option<&str> {
     (!s.is_empty() && s.len() <= 16 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some(s)
 }
 
+/// Development builds started with TENVY_MUTE (the end-to-end tests) never
+/// make a sound, whatever the UI asks.
+fn force_mute() -> bool {
+    cfg!(debug_assertions) && std::env::var_os("TENVY_MUTE").is_some()
+}
+
 // ---- commands ----
 
 #[tauri::command]
@@ -209,6 +215,7 @@ pub async fn mpv_set_volume(app: AppHandle, holder: State<'_, MpvHolder>, volume
 
 #[tauri::command]
 pub async fn mpv_set_muted(app: AppHandle, holder: State<'_, MpvHolder>, muted: bool) -> Result<()> {
+    let muted = muted || force_mute();
     #[cfg(windows)]
     {
         let mpv = ensure_mpv(&app, &holder).await?;
@@ -485,7 +492,8 @@ async fn ensure_mpv(app: &AppHandle, holder: &MpvHolder) -> Result<crate::mpv::M
     // instead of creating a new one on every call.
     if slot.is_none() {
         let child_hwnd = create_child_window(app).await?;
-        *slot = Some(MpvHandles { mpv: None, child_hwnd, audio: Default::default() });
+        let audio = crate::mpv::InitialAudio { muted: force_mute(), ..Default::default() };
+        *slot = Some(MpvHandles { mpv: None, child_hwnd, audio });
     }
     let handles = slot.as_mut().expect("just set");
     let (child_hwnd, audio) = (handles.child_hwnd, handles.audio);

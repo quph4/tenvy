@@ -60,6 +60,8 @@ function openCurrent(
   }
   const prefs = useTvPrefs.getState().tracks
   const catchup = pb.catchup
+  const nonce = pb.playNonce
+  const stillOn = () => usePlayback.getState().playNonce === nonce
   const open = catchup
     ? ipc.mpvLoadCatchup(channel.id, catchup.start, catchup.stop, prefs, start)
     : ipc.mpvLoad(channel.id, start, prefs)
@@ -68,6 +70,7 @@ function openCurrent(
     // previous one was paused should still start playing.
     .then(() => ipc.mpvSetPause(false))
     .then(() => {
+      if (!stillOn()) return // zapped on while this was opening
       const aspect = savedAspect()
       if (aspect !== 'auto') applyAspect(aspect)
       if (channel.kind !== 'live' || catchup || resume) return
@@ -82,6 +85,7 @@ function openCurrent(
       }, LIVE_WATCHED_MS)
     })
     .catch((e) => {
+      if (!stillOn()) return
       // Surface the real failure — unreachable URL, auth rejection, no
       // catch-up for that time. Without this toast the user clicks a
       // channel and sees nothing happen, which is the worst kind of bug.

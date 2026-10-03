@@ -1,5 +1,5 @@
 import { ArrowLeft, Clapperboard, Play, RotateCcw, Star } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { ipc } from '../../lib/ipc'
 import { cn } from '../../lib/cn'
@@ -246,9 +246,13 @@ function FavoriteButton({ channel }: { channel: Channel }) {
       cancelled = true
     }
   }, [channel.id])
+  const current = useRef(channel.id)
+  current.current = channel.id
   const toggle = async () => {
+    const id = channel.id
     try {
-      setFav(await ipc.toggleFavorite(channel.id))
+      const on = await ipc.toggleFavorite(id)
+      if (current.current === id) setFav(on)
     } catch (e) {
       push('error', String(e))
     }

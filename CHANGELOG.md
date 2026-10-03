@@ -69,6 +69,14 @@
 - mpv is bundled; no separate install needed.
 
 ### Fixed
+- Switching quickly between Live, Movies and Shows (or starting an
+  episode, then changing tab) could leave the previous tab's categories
+  or lists on screen. Only the newest answer is used now — also in
+  Manage categories, what's-on-now, history, account details and the
+  favorite star.
+- Going to Movies or Shows from live TV stops the channel instead of
+  leaving its sound playing behind the library; opening another title
+  while a film plays shows its page.
 - Escape on a programme card or in search no longer also closes the guide.
 - Switching to Movies or Shows from the guide opens the library; Live and
   Guide (and G) always return to live TV.

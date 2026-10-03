@@ -24,6 +24,8 @@ const pending = new Set<string>()
 const emptyAt = new Map<string, number>()
 const EMPTY_TTL_MS = 5 * 60 * 1000
 let flushTimer: number | null = null
+/** Bumped when a new guide lands; answers from before it are dropped. */
+let generation = 0
 
 export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
   byId: new Map(),
@@ -39,9 +41,15 @@ export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
       flushTimer = null
       const ids = [...pending]
       pending.clear()
+      const gen = generation
       ipc
         .nowPlaying(ids)
         .then((rows) => {
+          if (gen !== generation) {
+            // Asked about the old guide; ask again about the new one.
+            ids.forEach((id) => get().request(id))
+            return
+          }
           const next = new Map(get().byId)
           for (const id of ids) {
             next.set(id, null)
@@ -55,6 +63,7 @@ export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
   },
 
   invalidate() {
+    generation++
     emptyAt.clear()
     set({ byId: new Map() })
   },
