@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { Channel, MpvState, MpvTrack } from '../types'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { ipc } from '../lib/ipc'
 import { isResumable, useHistory } from './history'
 
 /**
@@ -173,7 +174,10 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
         /* non-fatal — the store flag alone still produces cinema mode */
       })
   },
-  setPlaying: (on) => set({ playing: on }),
+  setPlaying: (on) => {
+    set({ playing: on })
+    ipc.mpvSetPause(!on).catch(() => {})
+  },
   setPreferredAudioTrack: (idx) => set({ preferredAudioTrack: idx }),
   setPreferredSubtitleTrack: (idx) => set({ preferredSubtitleTrack: idx }),
   applyMpvState: (s) =>
@@ -184,9 +188,10 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       subtitleTracks: s.subtitleTracks,
       currentAudio: s.currentAudio,
       currentSubtitle: s.currentSubtitle,
-      // Reflect mpv's real play/pause so the button stays honest if the
-      // user hit the OSC inside the video pane. We do *not* mirror volume
-      // or muted — those are pure UI intent on our side.
-      playing: !s.paused && !s.idle,
+      // Reflect mpv's real pause flag so the button stays honest. Only the
+      // flag — mpv is briefly `idle` while a new file loads, and treating
+      // that as "not playing" used to flip the UI (and mpv) to paused. We
+      // do *not* mirror volume or muted — those are pure UI intent.
+      playing: !s.paused,
     }),
 }))

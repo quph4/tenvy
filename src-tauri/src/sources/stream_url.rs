@@ -62,9 +62,10 @@ pub fn redact(url: &str) -> String {
     let segments: Option<Vec<String>> =
         parsed.path_segments().map(|s| s.map(str::to_string).collect());
     if let Some(mut segs) = segments {
-        if segs.len() >= 4 && matches!(segs[0].as_str(), "live" | "movie" | "series") {
-            segs[1] = "***".into();
-            segs[2] = "***".into();
+        let refs: Vec<&str> = segs.iter().map(String::as_str).collect();
+        if let Some((u, p)) = crate::sources::xtream::credential_segments(&refs) {
+            segs[u] = "***".into();
+            segs[p] = "***".into();
             parsed.set_path(&segs.join("/"));
         }
     }
@@ -94,5 +95,6 @@ mod tests {
         let r = redact("http://h/get.php?username=alice&password=s3cret&type=m3u");
         assert!(!r.contains("alice") && !r.contains("s3cret") && r.contains("type=m3u"));
         assert!(!redact("http://bob:pw@h/x").contains("pw"));
+        assert_eq!(redact("http://h:2095/alice/s3cret/24639"), "http://h:2095/***/***/24639");
     }
 }

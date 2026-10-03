@@ -35,7 +35,6 @@ export function Player() {
     channel,
     volume,
     muted,
-    playing,
     fullscreen,
     setFullscreen,
     audioTracks,
@@ -47,7 +46,6 @@ export function Player() {
       channel: s.channel,
       volume: s.volume,
       muted: s.muted,
-      playing: s.playing,
       fullscreen: s.fullscreen,
       setFullscreen: s.setFullscreen,
       audioTracks: s.audioTracks,
@@ -110,26 +108,31 @@ export function Player() {
     // doesn't double-apply.
     const start = usePlayback.getState().pendingStart
     usePlayback.getState().consumePendingStart()
-    ipc.mpvLoad(streamUrl, start).catch((e) => {
-      // Surface the real failure — mpv-not-on-PATH, unreachable URL, auth
-      // rejection, codec refusal. Without this toast the user clicks a
-      // channel and sees nothing happen, which is the worst kind of bug.
-      const msg = String(e).replace(/^Error:\s*/, '')
-      push('error', `Playback failed: ${msg}`)
-    })
+    ipc
+      .mpvLoad(streamUrl, start)
+      // mpv's pause flag survives loadfile — a new channel picked while
+      // the previous one was paused should still start playing.
+      .then(() => ipc.mpvSetPause(false))
+      .catch((e) => {
+        // Surface the real failure — mpv-not-on-PATH, unreachable URL, auth
+        // rejection, codec refusal. Without this toast the user clicks a
+        // channel and sees nothing happen, which is the worst kind of bug.
+        const msg = String(e).replace(/^Error:\s*/, '')
+        push('error', `Playback failed: ${msg}`)
+      })
   }, [streamUrl, isVod, channelId, push])
 
-  // 3) Mirror UI intent → mpv for volume/mute/play. Track pickers call
-  //    ipc directly from Controls so they don't need a store round-trip.
+  // 3) Mirror UI intent → mpv for volume/mute. Play/pause is *not* an
+  //    effect: the store mirrors mpv's pause flag back into `playing`, and
+  //    an effect on it would feed mpv's transient states straight back in
+  //    (that loop used to pause streams while they were loading). The
+  //    store's setPlaying talks to mpv directly instead.
   useEffect(() => {
     ipc.mpvSetVolume(muted ? 0 : volume).catch(() => {})
   }, [volume, muted])
   useEffect(() => {
     ipc.mpvSetMuted(muted).catch(() => {})
   }, [muted])
-  useEffect(() => {
-    ipc.mpvSetPause(!playing).catch(() => {})
-  }, [playing])
 
   // 4) Geometry: report the video box's client rect to Rust whenever it
   //    changes. `useLayoutEffect` (not `useEffect`) so the geometry push

@@ -285,25 +285,29 @@ pub struct XtreamUrl {
 pub fn parse_xtream_url(url: &str) -> Option<XtreamUrl> {
     let parsed = reqwest::Url::parse(url).ok()?;
     let segments: Vec<&str> = parsed.path_segments()?.collect();
-    // Expect at least [kind, user, pass, "{id}[.{ext}]"].
-    if segments.len() < 4 {
-        return None;
-    }
-    let kind = match segments[0] {
-        "movie" | "series" | "live" => segments[0].to_string(),
+    let (kind, id_with_ext) = match segments.as_slice() {
+        [kind @ ("movie" | "series" | "live"), _user, _pass, id, ..] => (kind.to_string(), *id),
+        // Many panels also serve live TV at the short form
+        // `/{user}/{pass}/{id}` — no kind segment.
+        [_user, _pass, id] => ("live".to_string(), *id),
         _ => return None,
     };
-    let id_with_ext = segments[3];
-    let id_str = id_with_ext
-        .rsplit_once('.')
-        .map(|(a, _)| a)
-        .unwrap_or(id_with_ext);
-    let stream_id: i64 = id_str.parse().ok()?;
+    Some(XtreamUrl { kind, stream_id: parse_stream_id(id_with_ext)? })
+}
 
-    Some(XtreamUrl {
-        kind,
-        stream_id,
-    })
+/// `"123"` or `"123.ts"` → 123.
+fn parse_stream_id(segment: &str) -> Option<i64> {
+    segment.rsplit_once('.').map(|(a, _)| a).unwrap_or(segment).parse().ok()
+}
+
+/// Indexes of the username and password path segments in an Xtream stream
+/// URL's path, if it has that shape. Used to redact them from logs.
+pub fn credential_segments(segments: &[&str]) -> Option<(usize, usize)> {
+    match segments {
+        ["movie" | "series" | "live", _, _, id, ..] if parse_stream_id(id).is_some() => Some((1, 2)),
+        [_, _, id] if parse_stream_id(id).is_some() => Some((0, 1)),
+        _ => None,
+    }
 }
 
 // ---------- tolerant JSON access ----------
@@ -368,5 +372,7 @@ mod tests {
         assert_eq!((x.kind.as_str(), x.stream_id), ("movie", 42));
         assert_eq!(parse_xtream_url("http://h/series/u/p/7").unwrap().stream_id, 7);
         assert!(parse_xtream_url("http://h/other/u/p/7").is_none());
+        let short = parse_xtream_url("http://h:2095/u/p/24639").unwrap();
+        assert_eq!((short.kind.as_str(), short.stream_id), ("live", 24639));
     }
 }
