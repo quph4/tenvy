@@ -131,7 +131,32 @@ export function SettingsPanel() {
   )
 }
 
+/** A new GitHub issue with a short template (no personal data in the URL). */
+const REPORT_BODY = [
+  '**What happened?**',
+  '',
+  '',
+  '**What did you expect?**',
+  '',
+  '',
+  '**Steps to get there**',
+  '1. ',
+  '',
+  `**Tenvy version:** ${__APP_VERSION__}`,
+  '',
+  '**Diagnostics** (Settings → About → Copy diagnostics, then paste here):',
+  '```',
+  '',
+  '```',
+].join('\n')
+const REPORT_URL =
+  'https://github.com/quph4/tenvy-releases/issues/new?title=' +
+  encodeURIComponent('Problem: ') +
+  '&body=' +
+  encodeURIComponent(REPORT_BODY)
+
 function AboutSection() {
+  const push = useToast((s) => s.push)
   const status = useUpdater((s) => s.status)
   const checkForUpdates = useUpdater((s) => s.checkForUpdates)
   const install = useUpdater((s) => s.install)
@@ -174,6 +199,28 @@ function AboutSection() {
             Check for updates
           </button>
         )}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={() => openUrl(REPORT_URL).catch(() => {})}
+          className="inline-flex h-7 items-center rounded-md border border-neutral-800 px-2.5 text-xs text-neutral-300 hover:border-neutral-700"
+        >
+          Report a problem
+        </button>
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(await ipc.diagnostics())
+              push('success', 'Diagnostics copied — paste them into your report.')
+            } catch (e) {
+              push('error', `Couldn't copy diagnostics: ${String(e).replace(/^Error:\s*/, '')}`)
+            }
+          }}
+          className="inline-flex h-7 items-center rounded-md border border-neutral-800 px-2.5 text-xs text-neutral-300 hover:border-neutral-700"
+          title="Version, library counts and the end of the log — logins and addresses removed"
+        >
+          Copy diagnostics
+        </button>
       </div>
       <div className="mt-3 flex gap-4 text-[11px]">
         <button onClick={() => ipc.openLicenses().catch(() => {})} className="text-neutral-500 hover:text-neutral-300">

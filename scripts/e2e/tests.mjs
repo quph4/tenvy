@@ -310,6 +310,21 @@ export const tests = [
       }),
   },
   {
+    name: 'Diagnostics: useful and free of logins',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        ;(await t.pb()).getState().play(await t.live('Test One HD'))
+        await t.playing('Test One HD')
+        const text = await (await t.ipc()).diagnostics()
+        for (const want of ['Tenvy ', 'Providers:', 'xtream', 'Library:', 'log lines'])
+          if (!text.includes(want)) throw new Error(`missing "${want}"`)
+        for (const leak of ['/live/test/test/', 'username=test', 'password=test'])
+          if (text.includes(leak)) throw new Error(`leaks "${leak}"`)
+        await t.stop()
+        return `${text.split(/\r?\n/).length} lines`
+      }),
+  },
+  {
     name: 'Picture & sound panel: shape and stream details',
     run: (ctx) =>
       ctx.page(async (t) => {

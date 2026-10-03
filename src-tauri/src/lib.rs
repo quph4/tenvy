@@ -1,5 +1,6 @@
 mod commands;
 mod db;
+mod diagnostics;
 mod error;
 mod models;
 mod parental;
@@ -96,6 +97,7 @@ pub fn run() {
             commands::app_info,
             commands::get_channel,
             commands::open_licenses,
+            commands::diagnostics,
             commands::set_group_prefs,
             commands::parental_status,
             commands::parental_unlock,

@@ -453,6 +453,20 @@ pub async fn open_licenses(app: AppHandle) -> Result<()> {
         .map_err(|e| err!("couldn't open the licenses folder: {e}"))
 }
 
+/// Text report for problem reports; see diagnostics.rs.
+#[tauri::command]
+pub async fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
+    use tauri::Manager;
+    let db = state.db.clone();
+    let pin = state.parental.status().pin_set;
+    let dir = std::env::var_os("TENVY_DATA_DIR")
+        .filter(|_| cfg!(debug_assertions))
+        .map(std::path::PathBuf::from)
+        .or_else(|| app.path().app_data_dir().ok())
+        .unwrap_or_default();
+    Ok(tokio::task::spawn_blocking(move || crate::diagnostics::report(&db, &dir, pin)).await?)
+}
+
 // ---------- app info ----------
 
 #[derive(serde::Serialize)]

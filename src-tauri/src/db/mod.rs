@@ -1060,6 +1060,24 @@ pub fn is_section_title(name: &str) -> bool {
     nonspace(&head) >= 2 && nonspace(&tail) >= 2
 }
 
+/// Counts for the diagnostics report (no names or URLs).
+pub fn library_summary(db: &Db) -> Result<String> {
+    let conn = db.read();
+    let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap_or(-1) };
+    Ok(format!(
+        "{} channels/titles, {} episodes, {} programmes in the guide, {} favorites, {} in history, {} reminders, {} hidden channels, {} hidden and {} locked categories",
+        count("SELECT COUNT(*) FROM channels WHERE parent_id IS NULL"),
+        count("SELECT COUNT(*) FROM channels WHERE parent_id IS NOT NULL"),
+        count("SELECT COUNT(*) FROM programmes"),
+        count("SELECT COUNT(*) FROM favorites"),
+        count("SELECT COUNT(*) FROM watch_history"),
+        count("SELECT COUNT(*) FROM reminders"),
+        count("SELECT COUNT(*) FROM hidden_channels"),
+        count("SELECT COUNT(*) FROM group_prefs WHERE hidden = 1"),
+        count("SELECT COUNT(*) FROM group_prefs WHERE locked = 1"),
+    ))
+}
+
 // ---------- app meta ----------
 
 /// When Tenvy was first started on this PC (epoch seconds). Recorded on

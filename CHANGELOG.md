@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Settings → About: "Report a problem" (opens a short report form) and
+  "Copy diagnostics" (version, library counts and the end of the log,
+  with addresses and logins removed) to paste into it.
+
 ## 0.1.0 — 2026-10-04
 
 First public version.

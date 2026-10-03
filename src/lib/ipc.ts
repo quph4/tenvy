@@ -112,6 +112,10 @@ export const ipc = {
   async accountInfo(sourceId: number): Promise<AccountInfo | null> {
     return invoke('account_info', { sourceId })
   },
+  /** Text report for problem reports (URLs and logins scrubbed). */
+  async diagnostics(): Promise<string> {
+    return invoke('diagnostics')
+  },
   async openLicenses(): Promise<void> {
     return invoke('open_licenses')
   },
