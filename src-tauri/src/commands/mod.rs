@@ -10,7 +10,7 @@ use crate::err;
 use crate::error::Result;
 use crate::models::{
     AddSourceReq, Channel, Group, HistoryEntry, HistoryProgress, PlaylistProgress, Programme,
-    Source, SourceKind, VodDetails,
+    Reminder, Source, SourceKind, SourceStats, VodDetails,
 };
 use crate::sources::xtream::{self, Xtream};
 use crate::sources::{m3u, xmltv};
@@ -383,6 +383,38 @@ pub async fn vod_details(state: State<'_, AppState>, channel_id: i64) -> Result<
         .unwrap()
         .insert(channel_id, (Instant::now(), details.clone()));
     Ok(details)
+}
+
+// ---------- reminders ----------
+
+#[tauri::command]
+pub async fn add_reminder(
+    state: State<'_, AppState>,
+    channel_id: i64,
+    start: i64,
+    stop: i64,
+    title: String,
+) -> Result<()> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::add_reminder(&db, channel_id, start, stop, &title)).await?
+}
+
+#[tauri::command]
+pub async fn remove_reminder(state: State<'_, AppState>, channel_id: i64, start: i64) -> Result<()> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::remove_reminder(&db, channel_id, start)).await?
+}
+
+#[tauri::command]
+pub async fn list_reminders(state: State<'_, AppState>) -> Result<Vec<Reminder>> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::list_reminders(&db)).await?
+}
+
+#[tauri::command]
+pub async fn source_stats(state: State<'_, AppState>, id: i64) -> Result<SourceStats> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::source_stats(&db, id)).await?
 }
 
 // ---------- channels ----------

@@ -9,7 +9,9 @@ import type {
   MpvState,
   Programme,
   Source,
+  Reminder,
   SourceKind,
+  SourceStats,
   VodDetails,
 } from '../types'
 
@@ -61,6 +63,19 @@ export const ipc = {
    *  Fetched from the provider each call, served from cache offline. */
   async listEpisodes(channelId: number): Promise<Channel[]> {
     return invoke('list_episodes', { channelId })
+  },
+  async addReminder(channelId: number, p: { start: number; stop: number; title: string }): Promise<void> {
+    return invoke('add_reminder', { channelId, start: p.start, stop: p.stop, title: p.title })
+  },
+  async removeReminder(channelId: number, start: number): Promise<void> {
+    return invoke('remove_reminder', { channelId, start })
+  },
+  /** Upcoming and ongoing reminders, soonest first. */
+  async listReminders(): Promise<Reminder[]> {
+    return invoke('list_reminders')
+  },
+  async sourceStats(id: number): Promise<SourceStats> {
+    return invoke('source_stats', { id })
   },
   /** Plot, cast, artwork and trailer for a movie or series (cached). */
   async vodDetails(channelId: number): Promise<VodDetails> {

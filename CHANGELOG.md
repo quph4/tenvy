@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Reminders: "Remind me" on upcoming programmes in the guide (and on
+  what's next under the player); a Windows notification and a "Watch now"
+  prompt just before it starts. Programme cards in the guide.
+- New first-run page: connect your provider inline (paste a full Xtream
+  link to fill in all fields), then see what was imported.
 - Movie and series library: poster grid with ratings and progress,
   details pages (plot, cast, trailer, resume), seasons and episodes with
   "Continue", and a full-width player.

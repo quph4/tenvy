@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { RotateCcw, Tv2 } from 'lucide-react'
+import { Bell, RotateCcw, Tv2 } from 'lucide-react'
+import { useReminders } from '../../stores/reminders'
+import type { Channel } from '../../types'
 import { usePlayback } from '../../stores/playback'
 import { Controls, type PickerKind } from './Controls'
 import { TrackPanel, formatTrack, type TrackOption } from './TrackPanel'
@@ -490,8 +492,32 @@ function NowNext() {
           <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Next</span>
           <span className="truncate text-sm text-neutral-400">{next.title}</span>
           <span className="shrink-0 text-xs tabular-nums text-neutral-600">{hhmm(next.start)}</span>
+          {channel && <RemindButton channel={channel} programme={next} />}
         </div>
       )}
     </div>
+  )
+}
+
+function RemindButton({ channel, programme }: { channel: Channel; programme: Programme }) {
+  const on = useReminders((s) => s.items.some((r) => r.channel.id === channel.id && r.start === programme.start))
+  const push = useToast((s) => s.push)
+  return (
+    <button
+      onClick={() =>
+        useReminders
+          .getState()
+          .toggle(channel, programme)
+          .then((set) => push('success', set ? `We'll remind you at ${hhmm(programme.start)}` : 'Reminder removed'))
+          .catch((e) => push('error', String(e)))
+      }
+      className={`ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] ${
+        on ? 'text-accent-300' : 'text-neutral-500 hover:text-neutral-200'
+      }`}
+      title={on ? 'Remove reminder' : 'Remind me when it starts'}
+    >
+      <Bell className={`h-3 w-3 ${on ? 'fill-current' : ''}`} />
+      {on ? 'Reminder set' : 'Remind me'}
+    </button>
   )
 }

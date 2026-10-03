@@ -19,6 +19,7 @@ import { useUI } from './stores/ui'
 import { attachIngestListener } from './stores/ingest'
 import { attachGuideListener } from './stores/nowPlaying'
 import { startUpdateChecks } from './stores/updater'
+import { startReminderScheduler } from './stores/reminders'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
 import { subscribe } from './lib/ipc'
 
@@ -27,7 +28,9 @@ function App() {
   const { view } = useUI()
   // Fullscreen and the mini player both show only the video.
   const mini = usePlayback((s) => s.mini)
-  const chromeless = usePlayback((s) => s.fullscreen || s.mini)
+  const videoOnly = usePlayback((s) => s.fullscreen || s.mini)
+  // First run gets the whole window for the welcome page.
+  const chromeless = videoOnly || sources.length === 0
   // Movies and series are browsed in the library; once one plays, the
   // player takes the whole width (with a way back to the library).
   const libraryTab = activeKind !== 'live'
@@ -56,6 +59,7 @@ function App() {
   }, [])
 
   useEffect(() => startUpdateChecks(), [])
+  useEffect(() => startReminderScheduler(), [])
 
   useKeyboardShortcuts()
 

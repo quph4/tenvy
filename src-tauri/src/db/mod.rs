@@ -6,7 +6,9 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::Result;
-use crate::models::{Channel, Group, HistoryEntry, HistoryProgress, Programme, Source, SourceKind};
+use crate::models::{
+    Channel, Group, HistoryEntry, HistoryProgress, Programme, Reminder, Source, SourceKind, SourceStats,
+};
 
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 
@@ -90,6 +92,13 @@ fn migrate(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE INDEX IF NOT EXISTS idx_channels_kind ON channels(source_id, kind, group_name);
          CREATE INDEX IF NOT EXISTS idx_channels_parent ON channels(parent_id);
+         CREATE TABLE IF NOT EXISTS reminders (
+             channel_id INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+             start      INTEGER NOT NULL,
+             stop       INTEGER NOT NULL,
+             title      TEXT    NOT NULL,
+             PRIMARY KEY (channel_id, start)
+         ) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS epg_channels (
              name_key TEXT NOT NULL,
              id       TEXT NOT NULL,
@@ -781,6 +790,68 @@ pub fn clear_watch_history(db: &Db) -> Result<()> {
     Ok(())
 }
 
+// ---------- reminders ----------
+
+pub fn add_reminder(db: &Db, channel_id: i64, start: i64, stop: i64, title: &str) -> Result<()> {
+    let conn = db.write();
+    conn.execute(
+        "INSERT INTO reminders(channel_id, start, stop, title) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(channel_id, start) DO UPDATE SET stop = excluded.stop, title = excluded.title",
+        params![channel_id, start, stop, title],
+    )?;
+    Ok(())
+}
+
+pub fn remove_reminder(db: &Db, channel_id: i64, start: i64) -> Result<()> {
+    let conn = db.write();
+    conn.execute("DELETE FROM reminders WHERE channel_id = ?1 AND start = ?2", params![channel_id, start])?;
+    Ok(())
+}
+
+/// Reminders for programmes that haven't ended, soonest first. Ended ones
+/// are pruned on the way.
+pub fn list_reminders(db: &Db) -> Result<Vec<Reminder>> {
+    db.write()
+        .execute("DELETE FROM reminders WHERE stop < strftime('%s','now')", [])?;
+    let conn = db.read();
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {CHANNEL_COLS}, r.start AS r_start, r.stop AS r_stop, r.title AS r_title
+           FROM reminders r JOIN channels c ON c.id = r.channel_id
+          ORDER BY r.start"
+    ))?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(Reminder {
+                channel: row_to_channel(r)?,
+                start: r.get("r_start")?,
+                stop: r.get("r_stop")?,
+                title: r.get("r_title")?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Item counts per kind for one source — the "you're all set" summary.
+pub fn source_stats(db: &Db, source_id: i64) -> Result<SourceStats> {
+    let conn = db.read();
+    let mut stats = SourceStats::default();
+    let mut stmt = conn.prepare(
+        "SELECT kind, COUNT(*) FROM channels WHERE source_id = ?1 AND parent_id IS NULL GROUP BY kind",
+    )?;
+    let rows = stmt.query_map([source_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+    for row in rows {
+        let (kind, n) = row?;
+        match kind.as_str() {
+            "live" => stats.live = n,
+            "movie" => stats.movies = n,
+            "series" => stats.series = n,
+            _ => {}
+        }
+    }
+    Ok(stats)
+}
+
 // ---------- programmes ----------
 
 /// Store a parsed guide: its programmes, and its channel display names for
@@ -931,6 +1002,23 @@ mod tests {
         // The show disappearing takes its episodes with it.
         replace_channels(&db, sid, ALL_KINDS, &[]).unwrap();
         assert!(list_episodes(&db, show_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn reminders_round_trip_and_prune() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("A", "http://h/a")]).unwrap();
+        let a = id_of(&db, "A");
+        let now = chrono::Utc::now().timestamp();
+        add_reminder(&db, a, now + 600, now + 3600, "Match").unwrap();
+        add_reminder(&db, a, now - 7200, now - 3600, "Old").unwrap();
+        let list = list_reminders(&db).unwrap();
+        assert_eq!(list.len(), 1, "ended reminders are pruned");
+        assert_eq!(list[0].title, "Match");
+        remove_reminder(&db, a, now + 600).unwrap();
+        assert!(list_reminders(&db).unwrap().is_empty());
+        assert_eq!(source_stats(&db, sid).unwrap().live, 1);
     }
 
     #[test]

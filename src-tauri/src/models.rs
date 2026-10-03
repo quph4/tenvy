@@ -63,6 +63,25 @@ pub struct Channel {
     pub added: Option<i64>,
 }
 
+/// A programme the user asked to be reminded of.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Reminder {
+    pub channel: Channel,
+    pub start: i64,
+    pub stop: i64,
+    pub title: String,
+}
+
+/// Top-level item counts for a source.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceStats {
+    pub live: i64,
+    pub movies: i64,
+    pub series: i64,
+}
+
 /// Everything the library's details page shows for a movie or series.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]

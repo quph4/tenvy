@@ -32,7 +32,7 @@ export function IngestOverlay() {
         <div className="flex items-center gap-3">
           <Loader2 className="h-4 w-4 animate-spin text-accent-400" />
           <h3 className="text-sm font-semibold text-neutral-100">
-            Refreshing {status.sourceName}
+            Loading {status.sourceName}
           </h3>
           <span className="ml-auto text-[11px] tabular-nums text-neutral-500">{elapsed}s</span>
         </div>

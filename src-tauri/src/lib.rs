@@ -57,6 +57,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let dir = app
                 .path()
@@ -82,6 +83,10 @@ pub fn run() {
             commands::search_channels,
             commands::list_episodes,
             commands::vod_details,
+            commands::add_reminder,
+            commands::remove_reminder,
+            commands::list_reminders,
+            commands::source_stats,
             commands::list_favorites,
             commands::toggle_favorite,
             commands::programmes_for_channels,

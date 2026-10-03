@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { listen } from '@tauri-apps/api/event'
 import { usePlaylist } from '../../stores/playlist'
 import { usePlayback } from '../../stores/playback'
 import { ipc, subscribe } from '../../lib/ipc'
 import { DAY, floorToMinutes, hhmm, HOUR, weekday } from '../../lib/time'
-import { ChevronLeft, ChevronRight, History } from 'lucide-react'
+import { Bell, ChevronLeft, ChevronRight, History } from 'lucide-react'
+import { useReminders } from '../../stores/reminders'
+import { ProgrammeCard } from './ProgrammeCard'
 import type { Channel, Programme } from '../../types'
 import { cn } from '../../lib/cn'
 import { useUI } from '../../stores/ui'
@@ -34,14 +36,13 @@ export function EPGGrid() {
   // tunes to the live channel.
   const canCatchUp = (ch: Channel, p: Programme) =>
     !!ch.archiveDays && p.start < nowEpoch && p.start >= nowEpoch - ch.archiveDays * DAY
-  const openProgramme = (ch: Channel, p: Programme) => {
-    if (p.stop <= nowEpoch && canCatchUp(ch, p)) {
-      playCatchup(ch, p)
-      setView('player')
-    } else {
-      play(ch)
-    }
-  }
+  // Clicking a programme opens its card (watch / catch-up / remind me).
+  const [card, setCard] = useState<{ channel: Channel; programme: Programme } | null>(null)
+  const reminders = useReminders((s) => s.items)
+  const reminderKeys = useMemo(
+    () => new Set(reminders.map((r) => `${r.channel.id}:${r.start}`)),
+    [reminders],
+  )
 
   // Ticks once a minute so the "now" line and highlighting move.
   const [nowEpoch, setNowEpoch] = useState(() => Math.floor(Date.now() / 1000))
@@ -209,7 +210,7 @@ export function EPGGrid() {
                       return (
                         <button
                           key={`${p.channelTvgId}-${p.start}`}
-                          onClick={() => openProgramme(ch, p)}
+                          onClick={() => setCard({ channel: ch, programme: p })}
                           className={cn(
                             'absolute top-1 bottom-1 rounded-md border px-2 py-1 text-left text-xs transition-colors',
                             isNow
@@ -232,6 +233,9 @@ export function EPGGrid() {
                         >
                           <div className="flex items-center gap-1 font-medium">
                             {catchUp && <History className="h-3 w-3 shrink-0 text-amber-400/80" />}
+                            {reminderKeys.has(`${ch.id}:${p.start}`) && (
+                              <Bell className="h-3 w-3 shrink-0 fill-accent-400 text-accent-400" />
+                            )}
                             <span className="truncate">{p.title}</span>
                           </div>
                           <div className="truncate text-[10px] tabular-nums text-neutral-500">
@@ -255,6 +259,23 @@ export function EPGGrid() {
           </div>}
         </div>
       </div>
+
+      {card && (
+        <ProgrammeCard
+          channel={card.channel}
+          programme={card.programme}
+          onClose={() => setCard(null)}
+          onWatchLive={() => {
+            setCard(null)
+            play(card.channel)
+          }}
+          onCatchUp={() => {
+            setCard(null)
+            playCatchup(card.channel, card.programme)
+            setView('player')
+          }}
+        />
+      )}
     </div>
   )
 }

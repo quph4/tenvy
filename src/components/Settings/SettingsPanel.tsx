@@ -1,10 +1,12 @@
-import { Plus, RefreshCcw, Trash2, X } from 'lucide-react'
+import { Bell, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
 import { usePlaylist } from '../../stores/playlist'
 import { useIngest } from '../../stores/ingest'
 import { ipc } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
 import { useUpdater } from '../../stores/updater'
+import { useReminders } from '../../stores/reminders'
+import { hhmm, weekday } from '../../lib/time'
 
 export function SettingsPanel() {
   const { settingsOpen, toggleSettings, openAddSource } = useUI()
@@ -107,6 +109,7 @@ export function SettingsPanel() {
           </ul>
         </div>
 
+        <RemindersSection />
         <AboutSection />
       </aside>
     </div>
@@ -156,6 +159,40 @@ function AboutSection() {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+function RemindersSection() {
+  const items = useReminders((s) => s.items)
+  const remove = useReminders((s) => s.remove)
+  if (items.length === 0) return null
+  return (
+    <div className="border-t border-neutral-800 p-5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Reminders</span>
+      <ul className="mt-2 space-y-1.5">
+        {items.map((r) => (
+          <li
+            key={`${r.channel.id}:${r.start}`}
+            className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-sm"
+          >
+            <Bell className="h-3.5 w-3.5 shrink-0 text-accent-400" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-neutral-200">{r.title}</div>
+              <div className="truncate text-[11px] text-neutral-500">
+                {weekday(r.start)} {hhmm(r.start)} · {r.channel.name}
+              </div>
+            </div>
+            <button
+              onClick={() => remove(r.channel.id, r.start).catch(() => {})}
+              className="grid h-7 w-7 place-items-center rounded text-neutral-500 hover:bg-neutral-800 hover:text-red-400"
+              aria-label="Remove reminder"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

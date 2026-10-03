@@ -37,6 +37,21 @@ export interface Channel {
   added: number | null
 }
 
+/** A programme the user asked to be reminded of. */
+export interface Reminder {
+  channel: Channel
+  start: number
+  stop: number
+  title: string
+}
+
+/** Top-level item counts for a source. */
+export interface SourceStats {
+  live: number
+  movies: number
+  series: number
+}
+
 /** A movie or series details page (see Rust models::VodDetails). */
 export interface VodDetails {
   plot: string | null
