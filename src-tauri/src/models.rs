@@ -55,6 +55,8 @@ pub struct Channel {
     pub parent_id: Option<i64>,
     pub season: Option<i64>,
     pub episode: Option<i64>,
+    /// Days of catch-up the provider keeps for this live channel.
+    pub archive_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

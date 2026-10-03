@@ -96,5 +96,9 @@ mod tests {
         assert!(!r.contains("alice") && !r.contains("s3cret") && r.contains("type=m3u"));
         assert!(!redact("http://bob:pw@h/x").contains("pw"));
         assert_eq!(redact("http://h:2095/alice/s3cret/24639"), "http://h:2095/***/***/24639");
+        assert_eq!(
+            redact("http://h:2095/timeshift/alice/s3cret/30/2026-10-03:13-20/24639.ts"),
+            "http://h:2095/timeshift/***/***/30/2026-10-03:13-20/24639.ts"
+        );
     }
 }

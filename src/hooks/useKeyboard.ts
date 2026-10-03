@@ -4,6 +4,7 @@ import { usePlaylist } from '../stores/playlist'
 import { useUI } from '../stores/ui'
 import { useToast } from '../stores/toast'
 import { ipc } from '../lib/ipc'
+import { openInExternalPlayer } from '../lib/externalPlayer'
 
 /**
  * Global keyboard shortcuts. Mounted once from App.
@@ -13,6 +14,7 @@ import { ipc } from '../lib/ipc'
  *   Esc      close overlays
  *   Space    play/pause (when not typing)
  *   F        fullscreen
+ *   P        mini player (small always-on-top window)
  *   M        mute
  *   X        open current channel in external player (mpv / VLC)
  *   J / L    seek -10s / +10s (VOD only)
@@ -42,7 +44,8 @@ export function useKeyboardShortcuts() {
       if (e.key === 'Escape') {
         if (ui.searchOpen || ui.addSourceOpen || ui.settingsOpen) return // those handle their own escape
         if (pb.pendingResume) return // ResumePrompt handles its own escape
-        if (pb.fullscreen) pb.setFullscreen(false)
+        if (pb.mini) pb.setMini(false)
+        else if (pb.fullscreen) pb.setFullscreen(false)
         else if (ui.view === 'epg') ui.setView('player')
         return
       }
@@ -64,6 +67,12 @@ export function useKeyboardShortcuts() {
           e.preventDefault()
           pb.setFullscreen(!pb.fullscreen)
           break
+        case 'p':
+          if (!channel) return
+          e.preventDefault()
+          if (!pb.mini) ui.setView('player')
+          pb.setMini(!pb.mini)
+          break
         case 'm':
           if (!channel) return
           e.preventDefault()
@@ -72,14 +81,8 @@ export function useKeyboardShortcuts() {
         case 'x': {
           if (!channel) return
           e.preventDefault()
-          // Prefer what mpv is *actually* playing right now so in-app
-          // picks carry over to the external launch. Fall back to the
-          // saved preference if mpv hasn't reported tracks yet.
-          const audioTrack = pb.currentAudio ?? pb.preferredAudioTrack
-          const subtitleTrack = pb.currentSubtitle ?? pb.preferredSubtitleTrack
           const { push } = useToast.getState()
-          ipc
-            .openExternal(channel.id, { audioTrack, subtitleTrack })
+          openInExternalPlayer()
             .then((p) => push('success', `Launched ${p.split(/[\\/]/).pop() ?? p}`))
             .catch((err) => push('error', String(err)))
           break

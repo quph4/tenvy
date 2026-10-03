@@ -11,6 +11,17 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-set-min-size",
+    "core:window:allow-outer-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-is-maximized",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize",
+    "core:window:allow-current-monitor",
+    "core:window:allow-inner-size"
   ]
 }

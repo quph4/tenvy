@@ -24,7 +24,9 @@ import { subscribe } from './lib/ipc'
 function App() {
   const { sources, hydrate } = usePlaylist()
   const { view } = useUI()
-  const fullscreen = usePlayback((s) => s.fullscreen)
+  // Fullscreen and the mini player both show only the video.
+  const mini = usePlayback((s) => s.mini)
+  const chromeless = usePlayback((s) => s.fullscreen || s.mini)
 
   useEffect(() => {
     hydrate().catch(() => {
@@ -54,26 +56,26 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden">
-      {!fullscreen && <Topbar />}
+      {!chromeless && <Topbar />}
 
       <main className="flex flex-1 overflow-hidden">
         {sources.length === 0 ? (
           <FirstRun />
-        ) : view === 'epg' ? (
+        ) : view === 'epg' && !mini ? (
           <>
-            {!fullscreen && <Sidebar />}
+            {!chromeless && <Sidebar />}
             <EPGGrid />
           </>
         ) : (
           <>
-            {!fullscreen && <Sidebar />}
-            {!fullscreen && <ChannelList />}
+            {!chromeless && <Sidebar />}
+            {!chromeless && <ChannelList />}
             <Player />
           </>
         )}
       </main>
 
-      {!fullscreen && <footer className="flex h-7 items-center gap-3 border-t border-zinc-800/70 bg-zinc-950/80 px-4 text-[11px] text-zinc-500">
+      {!chromeless && <footer className="flex h-7 items-center gap-3 border-t border-zinc-800/70 bg-zinc-950/80 px-4 text-[11px] text-zinc-500">
         <span>
           <span className="kbd mr-1">G</span>
           Guide
@@ -89,6 +91,10 @@ function App() {
         <span>
           <span className="kbd mr-1">F</span>
           Fullscreen
+        </span>
+        <span>
+          <span className="kbd mr-1">P</span>
+          Mini player
         </span>
         <span className="ml-auto tabular-nums text-zinc-600">Tenvy · {__APP_VERSION__}</span>
       </footer>}

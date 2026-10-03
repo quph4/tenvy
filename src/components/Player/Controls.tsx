@@ -6,7 +6,9 @@ import {
   Maximize2,
   Minimize2,
   Pause,
+  PictureInPicture2,
   Play,
+  Radio,
   Volume2,
   VolumeX,
 } from 'lucide-react'
@@ -15,6 +17,8 @@ import { usePlayback } from '../../stores/playback'
 import { useToast } from '../../stores/toast'
 import { ipc } from '../../lib/ipc'
 import { cn } from '../../lib/cn'
+import { hhmm } from '../../lib/time'
+import { openInExternalPlayer } from '../../lib/externalPlayer'
 
 export type PickerKind = 'audio' | 'subtitle' | null
 
@@ -47,6 +51,9 @@ export function Controls({
     currentSubtitle,
     timePos,
     duration,
+    catchup,
+    mini,
+    setMini,
   } = usePlayback()
   const { push } = useToast()
 
@@ -56,10 +63,7 @@ export function Controls({
 
   const openExternal = async () => {
     try {
-      const s = usePlayback.getState()
-      const audioTrack = s.currentAudio ?? s.preferredAudioTrack
-      const subtitleTrack = s.currentSubtitle ?? s.preferredSubtitleTrack
-      const player = await ipc.openExternal(channel.id, { audioTrack, subtitleTrack })
+      const player = await openInExternalPlayer()
       const name = player.split(/[\\/]/).pop() ?? player
       push('success', `Launched ${name}`)
     } catch (e) {
@@ -69,7 +73,13 @@ export function Controls({
 
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-zinc-800/70 bg-zinc-950/95 px-4 py-2">
-      {isVod && <ScrubRow timePos={timePos} duration={duration} />}
+      {(isVod || catchup) && (
+        <ScrubRow
+          timePos={timePos}
+          // Archive streams often carry no duration; the guide knows it.
+          duration={duration ?? (catchup ? catchup.stop - catchup.start : null)}
+        />
+      )}
 
       <div className="flex items-center gap-3">
         <button
@@ -101,9 +111,28 @@ export function Controls({
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          <div className="mr-1 hidden max-w-[20rem] truncate text-xs text-white/70 sm:block">
-            {channel.name}
-          </div>
+          {catchup ? (
+            <>
+              <div className="mr-1 hidden max-w-[20rem] truncate text-xs text-white/70 sm:block">
+                <span className="mr-1.5 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300">
+                  Catch-up
+                </span>
+                {catchup.title} · {channel.name} · {hhmm(catchup.start)}
+              </div>
+              <button
+                onClick={() => usePlayback.getState().play(channel)}
+                className="inline-flex h-7 items-center gap-1 rounded-full bg-red-500/90 px-2.5 text-[11px] font-semibold text-white hover:bg-red-500"
+                title="Back to the live broadcast"
+              >
+                <Radio className="h-3 w-3" />
+                Live
+              </button>
+            </>
+          ) : (
+            <div className="mr-1 hidden max-w-[20rem] truncate text-xs text-white/70 sm:block">
+              {channel.name}
+            </div>
+          )}
 
           {isVod && (
             <>
@@ -143,6 +172,17 @@ export function Controls({
             title="Open in mpv / VLC (X)"
           >
             <ExternalLink className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setMini(!mini)}
+            className={cn(
+              'grid h-8 w-8 place-items-center rounded-full text-white/90 hover:bg-white/10',
+              mini && 'bg-white/10',
+            )}
+            aria-label={mini ? 'Exit mini player (P)' : 'Mini player (P)'}
+            title={mini ? 'Exit mini player (P)' : 'Mini player (P)'}
+          >
+            <PictureInPicture2 className="h-4 w-4" />
           </button>
           <button
             onClick={onToggleFullscreen}

@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDownAZ, ArrowDownWideNarrow, ChevronLeft, Star } from 'lucide-react'
+import { ArrowDownAZ, ArrowDownWideNarrow, ChevronLeft, History, Star } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePlayback } from '../stores/playback'
 import { usePlaylist, HISTORY_GROUP } from '../stores/playlist'
@@ -557,6 +557,11 @@ function ChannelRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{channel.name}</span>
+          {channel.archiveDays ? (
+            <span title={`Catch-up: ${channel.archiveDays} day(s)`} className="shrink-0 text-amber-400/70">
+              <History className="h-3 w-3" />
+            </span>
+          ) : null}
           {active && <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-indigo-400" />}
         </div>
         <div className="truncate text-xs text-zinc-500">

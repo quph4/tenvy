@@ -122,6 +122,7 @@ impl Xtream {
                 group: string(s, "category_id").and_then(|c| cats.get(&c).cloned()),
                 stream_url: self.stream_url("live", id, &ext),
                 kind: "live".into(),
+                archive_days: archive_days(s),
                 ..Default::default()
             });
         }
@@ -268,6 +269,69 @@ impl Xtream {
     fn stream_url(&self, kind: &str, id: i64, ext: &str) -> String {
         format!("{}/{}/{}/{}/{}.{}", self.host, kind, self.username, self.password, id, ext)
     }
+
+    /// Catch-up days per live stream id, for channels the panel archives.
+    /// Used to enrich M3U playlists that came from this panel's get.php,
+    /// which don't carry the archive flags themselves.
+    pub async fn archive_days_by_stream(&self) -> Result<HashMap<i64, i64>> {
+        Ok(self
+            .get_list("get_live_streams")
+            .await?
+            .iter()
+            .filter_map(|s| Some((int(s, "stream_id")?, archive_days(s)?)))
+            .collect())
+    }
+
+    /// Seconds to add to the UTC timestamp `at` to get the panel's local
+    /// wall clock at that moment — timeshift URLs are expressed in it.
+    ///
+    /// Uses the panel's configured timezone (server_info.timezone) with a
+    /// real tz database, so programmes before a DST switch get the offset
+    /// that applied then. `time_now` is not used: load-balanced panels
+    /// were seen returning it in local time on one request and in UTC on
+    /// the next, while the timezone name stays put.
+    pub async fn server_utc_offset(&self, at: i64) -> Result<i64> {
+        let v = self.get_json(None, &[]).await?;
+        let zone = v.get("server_info").and_then(|i| string(i, "timezone"));
+        Ok(utc_offset_in(zone.as_deref(), at))
+    }
+
+    /// Timeshift URL for `minutes` of a live stream starting at `start`
+    /// (UTC seconds), given the panel's offset from `server_utc_offset`.
+    pub fn catchup_url(&self, stream_id: i64, start: i64, minutes: i64, utc_offset: i64) -> Result<String> {
+        let local = chrono::DateTime::from_timestamp(start + utc_offset, 0)
+            .ok_or_else(|| err!("Invalid catch-up start time"))?
+            .naive_utc();
+        Ok(format!(
+            "{}/timeshift/{}/{}/{}/{}/{}.ts",
+            self.host,
+            self.username,
+            self.password,
+            minutes.max(1),
+            local.format("%Y-%m-%d:%H-%M"),
+            stream_id
+        ))
+    }
+}
+
+/// Offset of IANA zone `zone` from UTC at instant `at`; 0 (UTC) when the
+/// zone is missing or unknown, which is also what panels default to.
+fn utc_offset_in(zone: Option<&str>, at: i64) -> i64 {
+    use chrono::{Offset, TimeZone};
+    let Some(tz) = zone.and_then(|z| z.parse::<chrono_tz::Tz>().ok()) else {
+        return 0;
+    };
+    chrono::DateTime::from_timestamp(at, 0)
+        .map(|t| tz.offset_from_utc_datetime(&t.naive_utc()).fix().local_minus_utc() as i64)
+        .unwrap_or(0)
+}
+
+/// `tv_archive_duration` days when `tv_archive` is on.
+fn archive_days(s: &Value) -> Option<i64> {
+    (int(s, "tv_archive") == Some(1))
+        .then(|| int(s, "tv_archive_duration"))
+        .flatten()
+        .filter(|d| *d > 0)
 }
 
 /// Accept what users paste: `host:port`, `http://host:port/`, or a full
@@ -336,6 +400,8 @@ fn parse_stream_id(segment: &str) -> Option<i64> {
 pub fn credential_segments(segments: &[&str]) -> Option<(usize, usize)> {
     match segments {
         ["movie" | "series" | "live", _, _, id] if parse_stream_id(id).is_some() => Some((1, 2)),
+        // Catch-up: /timeshift/{user}/{pass}/{minutes}/{start}/{id}.ts
+        ["timeshift", _, _, _, _, id] if parse_stream_id(id).is_some() => Some((1, 2)),
         [_, _, id] if parse_stream_id(id).is_some() => Some((0, 1)),
         _ => None,
     }
@@ -381,6 +447,25 @@ mod tests {
         assert_eq!(string(&v, "c").as_deref(), Some("x"));
         assert_eq!(string(&v, "d"), None);
         assert_eq!(string(&v, "e"), None);
+    }
+
+    #[test]
+    fn builds_catchup_urls_in_server_time() {
+        let x = Xtream::new("http://h:8080", "u", "p", reqwest::Client::new()).unwrap();
+        // 2026-10-03 12:30:00 UTC, panel two hours ahead (CEST).
+        let url = x.catchup_url(42, 1_791_030_600, 60, 7200).unwrap();
+        assert_eq!(url, "http://h:8080/timeshift/u/p/60/2026-10-03:14-30/42.ts");
+        assert_eq!(archive_days(&json!({"tv_archive": "1", "tv_archive_duration": "3"})), Some(3));
+        assert_eq!(archive_days(&json!({"tv_archive": 0, "tv_archive_duration": "3"})), None);
+    }
+
+    #[test]
+    fn server_offsets_follow_dst() {
+        // 2026-07-01 12:00 UTC: CEST (+2h). 2026-12-01 12:00 UTC: CET (+1h).
+        assert_eq!(utc_offset_in(Some("Europe/Stockholm"), 1_782_907_200), 7200);
+        assert_eq!(utc_offset_in(Some("Europe/Stockholm"), 1_796_126_400), 3600);
+        assert_eq!(utc_offset_in(Some("Not/AZone"), 1_782_907_200), 0);
+        assert_eq!(utc_offset_in(None, 1_782_907_200), 0);
     }
 
     #[test]

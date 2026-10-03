@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Tv2 } from 'lucide-react'
+import { RotateCcw, Tv2 } from 'lucide-react'
 import { usePlayback } from '../../stores/playback'
 import { Controls, type PickerKind } from './Controls'
 import { TrackPanel, formatTrack, type TrackOption } from './TrackPanel'
@@ -12,6 +12,43 @@ import { useShallow } from 'zustand/react/shallow'
 import { useVideoObscured } from '../../hooks/useVideoObscured'
 
 const DRAWER_WIDTH = 288 // px — tailwind w-72
+/** Wait before retrying a stream that failed to open. */
+const RETRY_DELAY_MS = 2000
+
+/**
+ * Open whatever the playback store says should be playing: the live
+ * channel, its catch-up programme, or a VOD at its resume point.
+ *
+ * `resume` reopens the current pick (retry after a failure, recovery after
+ * a crash) at the last known position instead of consuming the one-shot
+ * `pendingStart` from the Resume prompt.
+ */
+function openCurrent(push: (kind: 'error' | 'info', message: string) => void, resume: boolean) {
+  const pb = usePlayback.getState()
+  const channel = pb.channel
+  if (!channel) return
+  const vod = channel.kind === 'movie' || channel.kind === 'series'
+  let start: number | null
+  if (resume) {
+    start = vod ? pb.timePos : null
+  } else {
+    start = pb.pendingStart
+    pb.consumePendingStart()
+  }
+  const open = pb.catchup
+    ? ipc.mpvLoadCatchup(channel.id, pb.catchup.start, pb.catchup.stop)
+    : ipc.mpvLoad(channel.id, start)
+  open
+    // mpv's pause flag survives loadfile — a new channel picked while the
+    // previous one was paused should still start playing.
+    .then(() => ipc.mpvSetPause(false))
+    .catch((e) => {
+      // Surface the real failure — unreachable URL, auth rejection, no
+      // catch-up for that time. Without this toast the user clicks a
+      // channel and sees nothing happen, which is the worst kind of bug.
+      push('error', `Playback failed: ${String(e).replace(/^Error:\s*/, '')}`)
+    })
+}
 
 /**
  * Host for the embedded mpv renderer.
@@ -36,6 +73,7 @@ export function Player() {
     volume,
     muted,
     fullscreen,
+    mini,
     setFullscreen,
     audioTracks,
     subtitleTracks,
@@ -47,6 +85,7 @@ export function Player() {
       volume: s.volume,
       muted: s.muted,
       fullscreen: s.fullscreen,
+      mini: s.mini,
       setFullscreen: s.setFullscreen,
       audioTracks: s.audioTracks,
       subtitleTracks: s.subtitleTracks,
@@ -77,7 +116,7 @@ export function Player() {
   //    which is a single load atom — no extra seek round-trip.
   const channelId = channel?.id
   const playNonce = usePlayback((s) => s.playNonce)
-  const streamUrl = channel?.streamUrl ?? null
+  const catchup = usePlayback((s) => s.catchup)
   const isVod = channel?.kind === 'movie' || channel?.kind === 'series'
   useEffect(() => {
     if (channelId === undefined) {
@@ -88,25 +127,44 @@ export function Player() {
       ipc.mpvSetGeometry(0, 0, 0, 0).catch(() => {})
       return
     }
-    // `pendingStart` is a one-shot seek offset the store parked for us
-    // when the user picked Resume (or Beginning) at the prompt. Consume
-    // it after we hand it to mpv so a later channel-independent re-render
-    // doesn't double-apply.
-    const start = usePlayback.getState().pendingStart
-    usePlayback.getState().consumePendingStart()
-    ipc
-      .mpvLoad(channelId, start)
-      // mpv's pause flag survives loadfile — a new channel picked while
-      // the previous one was paused should still start playing.
-      .then(() => ipc.mpvSetPause(false))
-      .catch((e) => {
-        // Surface the real failure — mpv-not-on-PATH, unreachable URL, auth
-        // rejection, codec refusal. Without this toast the user clicks a
-        // channel and sees nothing happen, which is the worst kind of bug.
-        const msg = String(e).replace(/^Error:\s*/, '')
-        push('error', `Playback failed: ${msg}`)
-      })
-  }, [streamUrl, isVod, channelId, playNonce, push])
+    // Open each pick exactly once. The Player remounts when coming back
+    // from the Guide view (and React StrictMode re-runs effects in dev);
+    // reopening then would reconnect — and providers that allow a single
+    // connection reject the second one.
+    const pb = usePlayback.getState()
+    if (pb.loadedNonce === playNonce) return
+    pb.markLoaded(playNonce)
+    openCurrent(push, false)
+  }, [channelId, playNonce, catchup, push])
+
+  // A stream that fails to open (provider still holding the previous
+  // connection, a hiccup) gets one automatic retry after a pause; a second
+  // failure for the same pick is reported.
+  const retriedNonce = useRef<number | null>(null)
+  useEffect(
+    () =>
+      usePlayback.subscribe((s, prev) => {
+        if (s.errorSeq === prev.errorSeq || !s.channel) return
+        const nonce = s.playNonce
+        if (retriedNonce.current !== nonce) {
+          retriedNonce.current = nonce
+          window.setTimeout(() => {
+            if (usePlayback.getState().playNonce === nonce) openCurrent(push, true)
+          }, RETRY_DELAY_MS)
+        } else if (s.catchup) {
+          // Seen in practice: channels flagged as archived whose recordings
+          // the panel answers with an empty page.
+          push('error', `Your provider has no recording of "${s.catchup.title}" on ${s.channel.name}.`)
+        } else {
+          push(
+            'error',
+            `Couldn't open ${s.channel.name}${s.lastError ? ` (${s.lastError})` : ''}. ` +
+              'If your provider allows one connection at a time, close any other player using it.',
+          )
+        }
+      }),
+    [push],
+  )
 
   // 3) Mirror UI intent → mpv for volume/mute. Play/pause is *not* an
   //    effect: the store mirrors mpv's pause flag back into `playing`, and
@@ -166,7 +224,7 @@ export function Player() {
     // Rerun when channel changes (empty state ↔ video box), fullscreen
     // toggles (siblings unmount/remount and the box jumps), or an overlay
     // opens/closes.
-  }, [channel?.id, fullscreen, obscured])
+  }, [channel?.id, fullscreen, mini, obscured])
 
   // The Player unmounts when the user switches to the Guide view. Without
   // this the native window would stay parked at its last rect, floating
@@ -230,10 +288,12 @@ export function Player() {
   useEffect(() => {
     return subscribe(() => onMpvEvent((ev) => {
       if (ev.kind === 'double-click') {
-        const { fullscreen, setFullscreen } = usePlayback.getState()
-        setFullscreen(!fullscreen)
+        // In the mini player a double-click restores the full window.
+        const { fullscreen, mini, setFullscreen, setMini } = usePlayback.getState()
+        if (mini) setMini(false)
+        else setFullscreen(!fullscreen)
       } else if (ev.kind === 'crashed') {
-        const { channel, timePos } = usePlayback.getState()
+        const { channel } = usePlayback.getState()
         const prev = lastCrashReload.current
         if (!channel || (prev?.channelId === channel.id && Date.now() - prev.at < 30_000)) {
           push('error', 'The player stopped unexpectedly.')
@@ -241,10 +301,7 @@ export function Player() {
         }
         lastCrashReload.current = { channelId: channel.id, at: Date.now() }
         push('info', 'The player stopped unexpectedly — restarting…')
-        const isVodNow = channel.kind === 'movie' || channel.kind === 'series'
-        ipc
-          .mpvLoad(channel.id, isVodNow ? timePos : null)
-          .catch((e) => push('error', `Playback failed: ${String(e).replace(/^Error:\s*/, '')}`))
+        openCurrent(push, true)
       }
     }))
   }, [push])
@@ -336,7 +393,7 @@ export function Player() {
               </div>
             </div>
           </div>
-          {!isVod && !fullscreen && <NowNext />}
+          {!isVod && !fullscreen && !mini && !catchup && <NowNext />}
         </>
       ) : (
         <PlayerEmpty error={initError} />
@@ -413,6 +470,16 @@ function NowNext() {
             <span className="shrink-0 text-xs tabular-nums text-zinc-500">
               {hhmm(now.start)} – {hhmm(now.stop)}
             </span>
+            {channel?.archiveDays ? (
+              <button
+                onClick={() => usePlayback.getState().playCatchup(channel, now)}
+                className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300 hover:border-zinc-700 hover:text-zinc-100"
+                title="Watch this programme from the beginning"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Start over
+              </button>
+            ) : null}
           </>
         ) : (
           <span className="text-xs text-zinc-500">No guide data</span>

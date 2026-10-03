@@ -29,6 +29,8 @@ export interface Channel {
   parentId: number | null
   season: number | null
   episode: number | null
+  /** Days of catch-up the provider keeps (live channels), else null. */
+  archiveDays: number | null
 }
 
 export interface Programme {
@@ -75,6 +77,10 @@ export interface MpvState {
   subtitleTracks: MpvTrack[]
   currentAudio: number | null
   currentSubtitle: number | null
+  /** Increments every time a stream fails to open. */
+  errorSeq: number
+  /** mpv's reason for the latest failure, e.g. "loading failed". */
+  lastError: string | null
 }
 
 /** One row from the watch_history table, joined with its channel. */

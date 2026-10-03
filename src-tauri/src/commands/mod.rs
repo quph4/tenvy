@@ -132,11 +132,30 @@ async fn ingest(app: &AppHandle, state: &State<'_, AppState>, id: i64) -> Result
 async fn ingest_m3u(app: &AppHandle, state: &State<'_, AppState>, source: &Source) -> Result<()> {
     let body = fetch_text(&state.http, &source.url).await?;
     emit_progress(app, source.id, "parsing", 0);
-    let (channels, guide_url) = tokio::task::spawn_blocking(move || {
+    let (mut channels, guide_url) = tokio::task::spawn_blocking(move || {
         let guide = m3u::header_guide_url(&body);
         m3u::parse(&body).map(|c| (c, guide))
     })
     .await??;
+
+    // An Xtream get.php playlist doesn't say which channels have catch-up;
+    // the panel's API does. Best effort — a failure only costs catch-up.
+    if let Some((host, user, pass)) = xtream::credentials_from_m3u_url(&source.url) {
+        match Xtream::new(&host, &user, &pass, state.http.clone()) {
+            Ok(xt) => match xt.archive_days_by_stream().await {
+                Ok(archive) => {
+                    for c in channels.iter_mut().filter(|c| c.kind == "live") {
+                        if let Some(x) = xtream::parse_xtream_url(&c.stream_url) {
+                            c.archive_days = archive.get(&x.stream_id).copied();
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(target: "tenvy_lib", "catch-up info unavailable: {}", e),
+            },
+            Err(e) => tracing::warn!(target: "tenvy_lib", "catch-up info unavailable: {}", e),
+        }
+    }
+
     let count = channels.len() as i64;
     emit_progress(app, source.id, "storing", count);
     let db = state.db.clone();
@@ -250,6 +269,49 @@ fn emit_progress(app: &AppHandle, source_id: i64, stage: &str, count: i64) {
             count,
         },
     );
+}
+
+/// The Xtream panel behind a source, if any: an Xtream source, or an M3U
+/// playlist downloaded from a panel's get.php.
+pub(crate) async fn xtream_for_source(state: &AppState, source_id: i64) -> Result<Option<Xtream>> {
+    let db = state.db.clone();
+    let (source, user, pass) =
+        tokio::task::spawn_blocking(move || db::get_source_credentials(&db, source_id)).await??;
+    let creds = match source.kind {
+        SourceKind::Xtream => Some((source.url, user.unwrap_or_default(), pass.unwrap_or_default())),
+        _ => xtream::credentials_from_m3u_url(&source.url),
+    };
+    creds
+        .map(|(host, user, pass)| Xtream::new(&host, &user, &pass, state.http.clone()))
+        .transpose()
+}
+
+/// Timeshift URL for a past (or ongoing) programme on a channel with
+/// catch-up. `start`/`stop` are UTC seconds from the guide.
+pub(crate) async fn catchup_url(state: &AppState, channel_id: i64, start: i64, stop: i64) -> Result<String> {
+    let db = state.db.clone();
+    let channel = tokio::task::spawn_blocking(move || db::get_channel(&db, channel_id))
+        .await??
+        .ok_or_else(|| err!("Channel not found"))?;
+    let days = channel
+        .archive_days
+        .ok_or_else(|| err!("{} has no catch-up.", channel.name))?;
+    let now = chrono::Utc::now().timestamp();
+    if start >= now {
+        return Err(err!("That programme hasn't started yet."));
+    }
+    if start < now - days * 86_400 {
+        return Err(err!("The provider only keeps {} day(s) of {}.", days, channel.name));
+    }
+    let stream_id = xtream::parse_xtream_url(&channel.stream_url)
+        .ok_or_else(|| err!("Catch-up needs an Xtream Codes stream."))?
+        .stream_id;
+    let xt = xtream_for_source(state, channel.source_id)
+        .await?
+        .ok_or_else(|| err!("Catch-up needs an Xtream Codes provider."))?;
+    let offset = xt.server_utc_offset(start).await?;
+    let minutes = (stop.max(start + 60) - start + 59) / 60;
+    xt.catchup_url(stream_id, start, minutes, offset)
 }
 
 // ---------- channels ----------

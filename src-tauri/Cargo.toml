@@ -38,6 +38,7 @@ tracing-appender = "0.2"
 url = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+chrono-tz = "0.10"
 
 # mpv embedding. We launch `mpv.exe` as a child process with --wid set to a
 # native child HWND we create inside the Tauri window, and talk to it over

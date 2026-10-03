@@ -42,6 +42,9 @@ use crate::sources::stream_url;
 
 pub mod hwnd;
 
+/// Pause between closing one stream and opening the next (see `load`).
+const SWITCH_GAP: Duration = Duration::from_millis(300);
+
 /// Minimum spacing between state emits caused purely by `time-pos`.
 const TIME_POS_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -62,6 +65,11 @@ pub struct MpvState {
     pub subtitle_tracks: Vec<TrackInfo>,
     pub current_audio: Option<i64>,
     pub current_subtitle: Option<i64>,
+    /// Bumped each time a file fails to open (end-file with reason
+    /// "error"), so the frontend can react once per failure.
+    pub error_seq: u64,
+    /// mpv's `file_error` for the latest failure, e.g. "loading failed".
+    pub last_error: Option<String>,
 }
 
 /// One track as reported by mpv's `track-list`. `id` is the `aid`/`sid`
@@ -328,6 +336,16 @@ impl Mpv {
             }
         }
 
+        // Close the current stream before opening the next. `loadfile
+        // replace` alone opens the new connection while the old one is
+        // still being torn down, and providers that allow a single
+        // connection reject the newcomer. A short pause lets the panel see
+        // the first connection go.
+        if !self.state.lock().await.idle {
+            let _ = self.command(&[json!("stop")]).await;
+            tokio::time::sleep(SWITCH_GAP).await;
+        }
+
         let mut args = vec![json!("loadfile"), json!(url), json!("replace")];
         if !options.is_empty() {
             // index (-1 = unused by `replace`), then the options list.
@@ -529,6 +547,13 @@ async fn pipe_task(
                         }
                         "end-file" => {
                             s.playing = false;
+                            if val.get("reason").and_then(|r| r.as_str()) == Some("error") {
+                                s.error_seq += 1;
+                                s.last_error = val
+                                    .get("file_error")
+                                    .and_then(|e| e.as_str())
+                                    .map(str::to_string);
+                            }
                         }
                         "file-loaded" => {
                             s.idle = false;

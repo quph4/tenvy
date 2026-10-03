@@ -93,6 +93,35 @@ pub async fn mpv_load(
     }
 }
 
+/// Play a past (or ongoing) programme from the provider's archive.
+#[tauri::command]
+pub async fn mpv_load_catchup(
+    app: AppHandle,
+    holder: State<'_, MpvHolder>,
+    state: State<'_, super::AppState>,
+    channel_id: i64,
+    start: i64,
+    stop: i64,
+) -> Result<()> {
+    let url = super::catchup_url(&state, channel_id, start, stop).await?;
+    let db = state.db.clone();
+    let playback = tokio::task::spawn_blocking(move || crate::db::get_playback(&db, channel_id))
+        .await??
+        .ok_or_else(|| err!("Channel not found"))?;
+    #[cfg(windows)]
+    {
+        ensure_mpv(&app, &holder)
+            .await?
+            .load(&url, None, playback.user_agent.as_deref(), playback.referrer.as_deref())
+            .await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, holder, url, playback);
+        Err(err!("embedded mpv is only supported on Windows right now"))
+    }
+}
+
 #[tauri::command]
 pub async fn mpv_set_pause(app: AppHandle, holder: State<'_, MpvHolder>, paused: bool) -> Result<()> {
     #[cfg(windows)]
@@ -244,6 +273,8 @@ pub struct StateSnapshot {
     pub subtitle_tracks: Vec<TrackInfoDto>,
     pub current_audio: Option<i64>,
     pub current_subtitle: Option<i64>,
+    pub error_seq: u64,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -284,6 +315,8 @@ impl From<crate::mpv::MpvState> for StateSnapshot {
             subtitle_tracks: s.subtitle_tracks.into_iter().map(map).collect(),
             current_audio: s.current_audio,
             current_subtitle: s.current_subtitle,
+            error_seq: s.error_seq,
+            last_error: s.last_error,
         }
     }
 }

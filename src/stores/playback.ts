@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { Channel, MpvState, MpvTrack } from '../types'
+import type { Channel, MpvState, MpvTrack, Programme } from '../types'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ipc } from '../lib/ipc'
+import { enterMiniWindow, exitMiniWindow } from '../lib/miniWindow'
 import { isResumable, useHistory } from './history'
 
 /**
@@ -26,6 +27,8 @@ interface PlaybackState {
   volume: number
   muted: boolean
   fullscreen: boolean
+  /** Mini player: small always-on-top window showing only the video. */
+  mini: boolean
   /** User's play/pause intent. Mirrored to mpv immediately. */
   playing: boolean
 
@@ -36,6 +39,9 @@ interface PlaybackState {
   subtitleTracks: MpvTrack[]
   currentAudio: number | null
   currentSubtitle: number | null
+  /** Mirrors mpv: bumps on every failed open; see MpvState.errorSeq. */
+  errorSeq: number
+  lastError: string | null
 
   // ---- external-launch prefs ----
   preferredAudioTrack: number | null
@@ -52,11 +58,19 @@ interface PlaybackState {
   /** Bumped on every `play`, so re-picking the channel that is already
    *  playing (e.g. "Start from beginning") still reloads it. */
   playNonce: number
+  /** The playNonce the Player last opened — survives Player remounts so
+   *  the same pick is never opened (connected) twice. */
+  loadedNonce: number
+  /** Set while playing a programme from the provider's archive instead
+   *  of the live stream; `channel` is still the live channel. */
+  catchup: Programme | null
 
   // ---- actions ----
   /** Low-level: play this channel, optionally seeking to `startSeconds`
    *  before showing the first frame. */
   play(ch: Channel, startSeconds?: number | null): void
+  /** Watch a past (or ongoing, from its start) programme via catch-up. */
+  playCatchup(ch: Channel, programme: Programme): void
   /** High-level: if the channel has a resumable saved position, open the
    *  resume prompt; otherwise start immediately. Call this from row clicks. */
   requestPlay(ch: Channel): void
@@ -67,11 +81,13 @@ interface PlaybackState {
   /** Mark the stash-start offset as consumed. Called by the Player after
    *  it feeds the value into `mpvLoad`. */
   consumePendingStart(): void
+  markLoaded(nonce: number): void
 
   stop(): void
   setVolume(v: number): void
   toggleMute(): void
   setFullscreen(on: boolean): void
+  setMini(on: boolean): void
   setPlaying(on: boolean): void
   setPreferredAudioTrack(idx: number | null): void
   setPreferredSubtitleTrack(idx: number | null): void
@@ -84,6 +100,7 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   volume: 0.8,
   muted: false,
   fullscreen: false,
+  mini: false,
   playing: false,
 
   timePos: null,
@@ -92,6 +109,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   subtitleTracks: [],
   currentAudio: null,
   currentSubtitle: null,
+  errorSeq: 0,
+  lastError: null,
 
   preferredAudioTrack: null,
   preferredSubtitleTrack: null,
@@ -99,6 +118,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   pendingStart: null,
   pendingResume: null,
   playNonce: 0,
+  loadedNonce: -1,
+  catchup: null,
 
   // Reset probed track prefs on channel change — they're per-file. We also
   // clear the mpv mirror so the UI doesn't flash the outgoing file's
@@ -106,6 +127,7 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   play: (ch, startSeconds = null) =>
     set((s) => ({
       playNonce: s.playNonce + 1,
+      catchup: null,
       channel: ch,
       playing: true,
       pendingStart: startSeconds,
@@ -119,6 +141,11 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       preferredAudioTrack: null,
       preferredSubtitleTrack: null,
     })),
+
+  playCatchup: (ch, programme) => {
+    get().play(ch, null)
+    set({ catchup: programme })
+  },
 
   requestPlay: (ch) => {
     const isVod = ch.kind === 'movie' || ch.kind === 'series'
@@ -151,9 +178,11 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   cancelResume: () => set({ pendingResume: null }),
 
   consumePendingStart: () => set({ pendingStart: null }),
+  markLoaded: (nonce) => set({ loadedNonce: nonce }),
 
   stop: () =>
     set({
+      catchup: null,
       channel: null,
       playing: false,
       pendingStart: null,
@@ -168,6 +197,7 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   setFullscreen: (on) => {
     if (get().fullscreen === on) return
+    if (on && get().mini) get().setMini(false)
     set({ fullscreen: on })
     // HTML requestFullscreen() needs a user gesture on the JS stack, which
     // double-clicks relayed from the native mpv HWND don't have. The Tauri
@@ -178,6 +208,14 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       .catch(() => {
         /* non-fatal — the store flag alone still produces cinema mode */
       })
+  },
+  setMini: (on) => {
+    if (get().mini === on) return
+    if (on && get().fullscreen) get().setFullscreen(false)
+    set({ mini: on })
+    ;(on ? enterMiniWindow() : exitMiniWindow()).catch(() => {
+      /* non-fatal — the store flag alone still hides the chrome */
+    })
   },
   setPlaying: (on) => {
     set({ playing: on })
@@ -193,6 +231,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       subtitleTracks: s.subtitleTracks,
       currentAudio: s.currentAudio,
       currentSubtitle: s.currentSubtitle,
+      errorSeq: s.errorSeq,
+      lastError: s.lastError,
       // Reflect mpv's real pause flag so the button stays honest. Only the
       // flag — mpv is briefly `idle` while a new file loads, and treating
       // that as "not playing" used to flip the UI (and mpv) to paused. We

@@ -136,6 +136,11 @@ export const ipc = {
   async mpvLoad(channelId: number, startSeconds: number | null = null): Promise<void> {
     return invoke('mpv_load', { channelId, startSeconds })
   },
+  /** Play a past or ongoing programme from the provider's archive.
+   *  `start`/`stop` are the programme's epoch seconds from the guide. */
+  async mpvLoadCatchup(channelId: number, start: number, stop: number): Promise<void> {
+    return invoke('mpv_load_catchup', { channelId, start, stop })
+  },
   async mpvSetPause(paused: boolean): Promise<void> {
     return invoke('mpv_set_pause', { paused })
   },

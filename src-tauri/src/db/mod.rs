@@ -73,6 +73,9 @@ fn migrate(conn: &Connection) -> Result<()> {
         // Per-stream HTTP headers from #EXTVLCOPT or `url|User-Agent=…`.
         ("user_agent", "ALTER TABLE channels ADD COLUMN user_agent TEXT"),
         ("referrer", "ALTER TABLE channels ADD COLUMN referrer TEXT"),
+        // Days of catch-up the provider keeps for a live channel (Xtream
+        // tv_archive_duration); NULL = no catch-up.
+        ("archive_days", "ALTER TABLE channels ADD COLUMN archive_days INTEGER"),
     ] {
         if !column_exists(conn, "channels", col)? {
             conn.execute(ddl, [])?;
@@ -112,7 +115,7 @@ fn migrate(conn: &Connection) -> Result<()> {
 const CHANNEL_COLS: &str = "c.id, c.source_id, \
      COALESCE(c.tvg_id, (SELECT e.id FROM epg_channels e WHERE e.name_key = c.name_key LIMIT 1)) AS tvg_id, \
      c.name, c.logo, c.group_name, c.stream_url, \
-     c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode";
+     c.sort_order, c.kind, c.container, c.parent_id, c.season, c.episode, c.archive_days";
 
 fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
@@ -148,6 +151,7 @@ fn row_to_channel(row: &rusqlite::Row) -> rusqlite::Result<Channel> {
         parent_id: row.get("parent_id")?,
         season: row.get("season")?,
         episode: row.get("episode")?,
+        archive_days: row.get("archive_days")?,
     })
 }
 
@@ -358,14 +362,14 @@ fn sync_rows(
             "UPDATE channels
                 SET tvg_id = ?2, name = ?3, logo = ?4, group_name = ?5, stream_url = ?6,
                     sort_order = ?7, kind = ?8, container = ?9, season = ?10, episode = ?11,
-                    name_key = ?12, user_agent = ?13, referrer = ?14
+                    name_key = ?12, user_agent = ?13, referrer = ?14, archive_days = ?15
               WHERE id = ?1",
         )?;
         let mut insert = tx.prepare(
             "INSERT INTO channels(source_id, parent_id, tvg_id, name, logo, group_name, stream_url,
                                   sort_order, kind, container, season, episode,
-                                  name_key, user_agent, referrer)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                                  name_key, user_agent, referrer, archive_days)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         )?;
         for (i, c) in items.iter().enumerate() {
             let group = group.or(c.group.as_deref());
@@ -383,13 +387,14 @@ fn sync_rows(
                     update.execute(params![
                         id, tvg_id, c.name, c.logo, group, c.stream_url, i as i64, c.kind,
                         c.container, c.season, c.episode, name_key, c.user_agent, c.referrer,
+                        c.archive_days,
                     ])?;
                 }
                 None => {
                     insert.execute(params![
                         source_id, parent_id, tvg_id, c.name, c.logo, group, c.stream_url,
                         i as i64, c.kind, c.container, c.season, c.episode, name_key,
-                        c.user_agent, c.referrer,
+                        c.user_agent, c.referrer, c.archive_days,
                     ])?;
                 }
             }
@@ -437,6 +442,8 @@ pub struct ChannelInsert {
     /// HTTP headers the provider requires for this stream.
     pub user_agent: Option<String>,
     pub referrer: Option<String>,
+    /// Days of catch-up available (live channels only).
+    pub archive_days: Option<i64>,
 }
 
 /// What the player needs to open a channel.

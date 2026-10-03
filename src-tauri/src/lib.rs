@@ -98,6 +98,7 @@ pub fn run() {
             // conditionally include tokens.
             commands::mpv_state::mpv_init,
             commands::mpv_state::mpv_load,
+            commands::mpv_state::mpv_load_catchup,
             commands::mpv_state::mpv_set_pause,
             commands::mpv_state::mpv_seek,
             commands::mpv_state::mpv_set_volume,
