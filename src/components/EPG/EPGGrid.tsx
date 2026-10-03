@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { listen } from '@tauri-apps/api/event'
 import { usePlaylist } from '../../stores/playlist'
 import { usePlayback } from '../../stores/playback'
-import { ipc } from '../../lib/ipc'
+import { ipc, subscribe } from '../../lib/ipc'
 import { floorToMinutes, hhmm, HOUR, weekday } from '../../lib/time'
 import type { Channel, Programme } from '../../types'
 import { cn } from '../../lib/cn'
@@ -52,13 +52,7 @@ export function EPGGrid() {
   useEffect(() => {
     setProgrammes(new Map())
   }, [windowStart])
-  useEffect(() => {
-    let unlisten: (() => void) | null = null
-    listen('guide-updated', () => setProgrammes(new Map()))
-      .then((fn) => (unlisten = fn))
-      .catch(() => {})
-    return () => unlisten?.()
-  }, [])
+  useEffect(() => subscribe(() => listen('guide-updated', () => setProgrammes(new Map()))), [])
 
   // Load programmes for the visible rows
   useEffect(() => {

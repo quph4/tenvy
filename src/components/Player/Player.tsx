@@ -4,7 +4,7 @@ import { usePlayback } from '../../stores/playback'
 import { Controls, type PickerKind } from './Controls'
 import { TrackPanel, formatTrack, type TrackOption } from './TrackPanel'
 import type { Programme } from '../../types'
-import { ipc, onMpvEvent, onMpvState } from '../../lib/ipc'
+import { ipc, onMpvEvent, onMpvState, subscribe } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
 import { hhmm } from '../../lib/time'
 import { END_GUARD, useHistory } from '../../stores/history'
@@ -65,32 +65,18 @@ export function Player() {
   //    double-invoke is fine. Subscribe to state events regardless of
   //    success — if Rust rejected init, no events will fire.
   useEffect(() => {
-    let unlisten: (() => void) | null = null
-
     ipc.mpvInit().catch((e) => {
       setInitError(String(e))
       push('error', `mpv init failed: ${e}`)
     })
-
-    onMpvState((s) => {
-      usePlayback.getState().applyMpvState(s)
-    })
-      .then((fn) => {
-        unlisten = fn
-      })
-      .catch(() => {
-        /* non-fatal — scrub/track data just won't update */
-      })
-
-    return () => {
-      unlisten?.()
-    }
+    return subscribe(() => onMpvState((s) => usePlayback.getState().applyMpvState(s)))
   }, [push])
 
   // 2) Load / reload when the user picks a channel. For VOD we look up a
   //    saved resume position and pass it through as mpv's start time,
   //    which is a single load atom — no extra seek round-trip.
   const channelId = channel?.id
+  const playNonce = usePlayback((s) => s.playNonce)
   const streamUrl = channel?.streamUrl ?? null
   const isVod = channel?.kind === 'movie' || channel?.kind === 'series'
   useEffect(() => {
@@ -120,7 +106,7 @@ export function Player() {
         const msg = String(e).replace(/^Error:\s*/, '')
         push('error', `Playback failed: ${msg}`)
       })
-  }, [streamUrl, isVod, channelId, push])
+  }, [streamUrl, isVod, channelId, playNonce, push])
 
   // 3) Mirror UI intent → mpv for volume/mute. Play/pause is *not* an
   //    effect: the store mirrors mpv's pause flag back into `playing`, and
@@ -242,8 +228,7 @@ export function Player() {
   // channel per 30s, so a stream that reliably crashes mpv can't loop.
   const lastCrashReload = useRef<{ channelId: number; at: number } | null>(null)
   useEffect(() => {
-    let unlisten: (() => void) | null = null
-    onMpvEvent((ev) => {
+    return subscribe(() => onMpvEvent((ev) => {
       if (ev.kind === 'double-click') {
         const { fullscreen, setFullscreen } = usePlayback.getState()
         setFullscreen(!fullscreen)
@@ -261,14 +246,7 @@ export function Player() {
           .mpvLoad(channel.id, isVodNow ? timePos : null)
           .catch((e) => push('error', `Playback failed: ${String(e).replace(/^Error:\s*/, '')}`))
       }
-    })
-      .then((fn) => {
-        unlisten = fn
-      })
-      .catch(() => {})
-    return () => {
-      unlisten?.()
-    }
+    }))
   }, [push])
 
   const audioOptions: TrackOption[] = audioTracks.map((t, i) => ({

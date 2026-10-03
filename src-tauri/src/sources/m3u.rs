@@ -1,4 +1,5 @@
 use crate::db::ChannelInsert;
+use crate::err;
 use crate::error::Result;
 
 /// Parse an M3U / M3U8 playlist.
@@ -9,6 +10,12 @@ use crate::error::Result;
 /// HTTP headers from `#EXTVLCOPT:http-user-agent=` / `http-referrer=` lines
 /// and Kodi-style `url|User-Agent=…&Referer=…` suffixes.
 pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
+    // A provider error page (HTML, JSON) served with status 200 must not be
+    // read as a playlist of junk "channels" that then replaces the real one.
+    let head = input.trim_start_matches('﻿').trim_start();
+    if !head.starts_with("#EXTM3U") && !input.contains("#EXTINF") {
+        return Err(err!("This doesn't look like an M3U playlist. Check the URL, or try again later."));
+    }
     let mut out = Vec::new();
     let mut pending: Option<PartialEntry> = None;
 
@@ -69,6 +76,9 @@ pub fn parse(input: &str) -> Result<Vec<ChannelInsert>> {
         });
     }
 
+    if out.is_empty() {
+        return Err(err!("The playlist contains no channels."));
+    }
     Ok(out)
 }
 
@@ -269,6 +279,13 @@ mod tests {
         assert_eq!(out[0].kind, "live");
         assert_eq!(out[1].name, "Plain Channel");
         assert!(out[1].group.is_none());
+    }
+
+    #[test]
+    fn rejects_non_playlists() {
+        assert!(parse("<html><body>Service unavailable</body></html>").is_err());
+        assert!(parse("#EXTM3U
+").is_err());
     }
 
     #[test]

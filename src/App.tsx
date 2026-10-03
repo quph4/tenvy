@@ -19,6 +19,7 @@ import { attachIngestListener } from './stores/ingest'
 import { attachGuideListener } from './stores/nowPlaying'
 import { startUpdateChecks } from './stores/updater'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
+import { subscribe } from './lib/ipc'
 
 function App() {
   const { sources, hydrate } = usePlaylist()
@@ -43,15 +44,8 @@ function App() {
   // Guides are downloaded in the background after an ingest; when one
   // lands, cached now-playing data is dropped so rows pick it up.
   useEffect(() => {
-    const unlisteners: (() => void)[] = []
-    for (const attach of [attachIngestListener, attachGuideListener]) {
-      attach()
-        .then((fn) => unlisteners.push(fn))
-        .catch(() => {
-          /* non-fatal — the overlay / guide just won't live-update */
-        })
-    }
-    return () => unlisteners.forEach((fn) => fn())
+    const cleanups = [subscribe(attachIngestListener), subscribe(attachGuideListener)]
+    return () => cleanups.forEach((fn) => fn())
   }, [])
 
   useEffect(() => startUpdateChecks(), [])

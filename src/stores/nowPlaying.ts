@@ -20,6 +20,9 @@ interface NowPlayingState {
 }
 
 const pending = new Set<string>()
+/** When an id last came back with nothing on; retried after EMPTY_TTL_MS. */
+const emptyAt = new Map<string, number>()
+const EMPTY_TTL_MS = 5 * 60 * 1000
 let flushTimer: number | null = null
 
 export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
@@ -28,7 +31,8 @@ export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
   request(tvgId) {
     const cached = get().byId.get(tvgId)
     const now = Date.now() / 1000
-    if (cached !== undefined && (cached === null || cached.stop > now)) return
+    if (cached != null && cached.stop > now) return
+    if (cached === null && Date.now() - (emptyAt.get(tvgId) ?? 0) < EMPTY_TTL_MS) return
     pending.add(tvgId)
     if (flushTimer !== null) return
     flushTimer = window.setTimeout(() => {
@@ -39,7 +43,10 @@ export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
         .nowPlaying(ids)
         .then((rows) => {
           const next = new Map(get().byId)
-          for (const id of ids) next.set(id, null)
+          for (const id of ids) {
+            next.set(id, null)
+            emptyAt.set(id, Date.now())
+          }
           for (const p of rows) next.set(p.channelTvgId, p)
           set({ byId: next })
         })
@@ -48,6 +55,7 @@ export const useNowPlayingStore = create<NowPlayingState>((set, get) => ({
   },
 
   invalidate() {
+    emptyAt.clear()
     set({ byId: new Map() })
   },
 }))
@@ -60,12 +68,20 @@ export function useNowPlaying(tvgId: string | null): Programme | null {
   useEffect(() => {
     if (key && (entry === undefined || expired)) useNowPlayingStore.getState().request(key)
   }, [key, entry, expired])
-  // Refetch when the programme ends while the row stays on screen.
+  // Refetch when the programme ends while the row stays on screen, or
+  // periodically while nothing is on (a programme may start later).
   useEffect(() => {
-    if (!key || !entry) return
-    const ms = entry.stop * 1000 - Date.now()
+    if (!key || entry === undefined) return
+    const refetch = () => useNowPlayingStore.getState().request(key)
+    if (entry === null) {
+      // An interval, not a timeout: a retry that again finds nothing
+      // leaves `entry` unchanged, so this effect wouldn't re-arm.
+      const t = window.setInterval(refetch, EMPTY_TTL_MS + 1000)
+      return () => window.clearInterval(t)
+    }
+    const ms = entry.stop * 1000 - Date.now() + 1000
     if (ms <= 0) return
-    const t = window.setTimeout(() => useNowPlayingStore.getState().request(key), ms + 1000)
+    const t = window.setTimeout(refetch, ms)
     return () => window.clearTimeout(t)
   }, [key, entry])
   return entry && !expired ? entry : null

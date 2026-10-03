@@ -237,10 +237,30 @@ pub fn touch_source(db: &Db, id: i64) -> Result<()> {
 /// with ON DELETE CASCADE — survive a refresh. Only channels that are no
 /// longer in the playlist are deleted. Episode rows (`parent_id` set) are
 /// left alone; they belong to their show and go when it goes.
-pub fn replace_channels(db: &Db, source_id: i64, channels: &[ChannelInsert]) -> Result<usize> {
+///
+/// `kinds` lists the content kinds this ingest is authoritative for; rows
+/// of other kinds are left untouched. An Xtream import whose movie list
+/// failed to download passes only `["live", "series"]`, so a provider
+/// hiccup can't wipe every movie (and its favorites and resume points).
+pub fn replace_channels(
+    db: &Db,
+    source_id: i64,
+    kinds: &[&str],
+    channels: &[ChannelInsert],
+) -> Result<usize> {
     let mut conn = db.write();
     let tx = conn.transaction()?;
-    sync_rows(&tx, source_id, None, None, channels)?;
+    let (kind, url): (String, String) = tx.query_row(
+        "SELECT kind, url FROM sources WHERE id = ?1",
+        [source_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    // Xtream stream URLs can be keyed on their stream id (see
+    // `channel_key`) — but only for sources that really are Xtream panels;
+    // an ordinary M3U's paths can look the same by accident.
+    let xtream_ids = kind == SourceKind::Xtream.as_str()
+        || crate::sources::xtream::credentials_from_m3u_url(&url).is_some();
+    sync_rows(&tx, source_id, None, Some(kinds), None, xtream_ids, channels)?;
     tx.commit()?;
     Ok(channels.len())
 }
@@ -256,7 +276,7 @@ pub fn replace_episodes(db: &Db, parent_id: i64, episodes: &[ChannelInsert]) -> 
             [parent_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
-        sync_rows(&tx, source_id, Some(parent_id), group.as_deref(), episodes)?;
+        sync_rows(&tx, source_id, Some(parent_id), None, group.as_deref(), true, episodes)?;
         tx.commit()?;
     }
     list_episodes(db, parent_id)
@@ -276,26 +296,60 @@ pub fn list_episodes(db: &Db, parent_id: i64) -> Result<Vec<Channel>> {
 /// The shared update-in-place / insert / delete-vanished algorithm, scoped
 /// to one source and one parent (None = top-level rows). Duplicate keys
 /// (the same stream listed under two groups) pair up with existing rows in
-/// id order. `group` overrides each item's group (episodes inherit the
-/// show's).
+/// id order. `kinds` limits which existing rows are in scope (None = all);
+/// `group` overrides each item's group (episodes inherit the show's).
+///
+/// Refuses (and so keeps the current rows) when the new list would delete
+/// most of a sizeable existing one: that is far more likely a provider
+/// returning a truncated or empty response than a real catalogue change,
+/// and deletions cascade to favorites and watch history.
 fn sync_rows(
     tx: &rusqlite::Transaction,
     source_id: i64,
     parent_id: Option<i64>,
+    kinds: Option<&[&str]>,
     group: Option<&str>,
+    xtream_ids: bool,
     items: &[ChannelInsert],
 ) -> Result<()> {
     let mut existing: HashMap<String, VecDeque<i64>> = HashMap::new();
+    let mut existing_total = 0usize;
     {
-        let mut stmt = tx.prepare(
-            "SELECT id, stream_url FROM channels WHERE source_id = ?1 AND parent_id IS ?2 ORDER BY id",
-        )?;
-        let rows = stmt.query_map(params![source_id, parent_id], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
-        })?;
+        let mut sql = String::from(
+            "SELECT id, stream_url FROM channels WHERE source_id = ? AND parent_id IS ?",
+        );
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(source_id), Box::new(parent_id)];
+        if let Some(kinds) = kinds {
+            sql.push_str(&format!(" AND kind IN ({})", vec!["?"; kinds.len()].join(",")));
+            args.extend(kinds.iter().map(|k| Box::new(k.to_string()) as Box<dyn rusqlite::ToSql>));
+        }
+        sql.push_str(" ORDER BY id");
+        let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|a| a.as_ref()).collect();
+        let mut stmt = tx.prepare(&sql)?;
+        let rows = stmt.query_map(refs.as_slice(), |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
         for row in rows {
             let (id, url) = row?;
-            existing.entry(channel_key(&url)).or_default().push_back(id);
+            existing.entry(channel_key(&url, xtream_ids)).or_default().push_back(id);
+            existing_total += 1;
+        }
+    }
+
+    // Count what would vanish before touching anything.
+    {
+        let mut unclaimed: HashMap<String, usize> =
+            existing.iter().map(|(k, v)| (k.clone(), v.len())).collect();
+        for c in items {
+            if let Some(n) = unclaimed.get_mut(&channel_key(&c.stream_url, xtream_ids)) {
+                *n = n.saturating_sub(1);
+            }
+        }
+        let vanishing: usize = unclaimed.values().sum();
+        if existing_total >= MASS_DELETE_MIN_ROWS && vanishing * 10 > existing_total * 7 {
+            return Err(crate::err!(
+                "The provider returned only {} items where there were {} before. Keeping your                  current list — try refreshing again later, or remove and re-add the playlist                  if this change is expected.",
+                items.len(),
+                existing_total
+            ));
         }
     }
 
@@ -322,7 +376,7 @@ fn sync_rows(
                 .then(|| crate::sources::xmltv::channel_name_key(&c.name))
                 .filter(|k| !k.is_empty());
             let reuse = existing
-                .get_mut(&channel_key(&c.stream_url))
+                .get_mut(&channel_key(&c.stream_url, xtream_ids))
                 .and_then(|ids| ids.pop_front());
             match reuse {
                 Some(id) => {
@@ -352,15 +406,23 @@ fn sync_rows(
 /// Identity of a channel across refreshes. Xtream URLs embed the account's
 /// host, username and password, any of which can change (providers rotate
 /// DNS, users reset passwords) without the stream itself changing — so for
-/// those we key on `{kind}/{stream_id}`. Everything else keys on the URL.
-fn channel_key(stream_url: &str) -> String {
-    match crate::sources::xtream::parse_xtream_url(stream_url) {
+/// those we key on `{kind}/{stream_id}` when the source is an Xtream panel.
+/// Everything else keys on the URL.
+fn channel_key(stream_url: &str, xtream_ids: bool) -> String {
+    match crate::sources::xtream::parse_xtream_url(stream_url).filter(|_| xtream_ids) {
         Some(x) => format!("xtream:{}/{}", x.kind, x.stream_id),
         None => stream_url.to_string(),
     }
 }
 
-#[derive(Debug, Default)]
+/// Every content kind — for ingests (like M3U) that cover all of them.
+pub const ALL_KINDS: &[&str] = &["live", "movie", "series"];
+
+/// Below this many existing rows the mass-deletion guard in `sync_rows`
+/// doesn't apply — small playlists legitimately change wholesale.
+const MASS_DELETE_MIN_ROWS: usize = 200;
+
+#[derive(Debug, Default, Clone)]
 pub struct ChannelInsert {
     pub tvg_id: Option<String>,
     pub name: String,
@@ -795,7 +857,7 @@ mod tests {
             container: true,
             ..ch("Show", "http://h/series/u/p/9")
         };
-        replace_channels(&db, sid, &[show]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[show]).unwrap();
         let show_id = id_of(&db, "Show");
 
         let ep = |n: i64| ChannelInsert {
@@ -814,12 +876,12 @@ mod tests {
         // that still contains the show leaves them (and history) intact.
         assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 1);
         let show_again = ChannelInsert { kind: "series".into(), container: true, ..ch("Show", "http://h/series/u/p/9") };
-        replace_channels(&db, sid, &[show_again]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[show_again]).unwrap();
         assert_eq!(list_episodes(&db, show_id).unwrap().len(), 2);
         assert!(get_watch_entry(&db, eps[0].id).unwrap().is_some());
 
         // The show disappearing takes its episodes with it.
-        replace_channels(&db, sid, &[]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[]).unwrap();
         assert!(list_episodes(&db, show_id).unwrap().is_empty());
     }
 
@@ -828,7 +890,7 @@ mod tests {
         let db = test_db();
         let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
         let with_id = ChannelInsert { tvg_id: Some("Kanal5.SE".into()), ..ch("Kanal 5", "http://h/k5") };
-        replace_channels(&db, sid, &[ch("SE: SVT1 HD", "http://h/1"), with_id, ch("Unknown", "http://h/u")]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("SE: SVT1 HD", "http://h/1"), with_id, ch("Unknown", "http://h/u")]).unwrap();
         let guide = crate::sources::xmltv::Guide {
             programmes: vec![Programme {
                 channel_tvg_id: "svt1.se".into(),
@@ -848,6 +910,48 @@ mod tests {
         assert_eq!(now[0].title, "Rapport");
     }
 
+    fn many(prefix: &str, n: usize, kind: &str) -> Vec<ChannelInsert> {
+        (0..n)
+            .map(|i| ChannelInsert { kind: kind.into(), ..ch(&format!("{prefix}{i}"), &format!("http://h/{prefix}/{i}")) })
+            .collect()
+    }
+
+    #[test]
+    fn refuses_to_wipe_most_of_a_large_list() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &many("c", 300, "live")).unwrap();
+        // A truncated response: only 10 of 300 survive.
+        assert!(replace_channels(&db, sid, ALL_KINDS, &many("c", 10, "live")).is_err());
+        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 300);
+        // A modest change still goes through.
+        replace_channels(&db, sid, ALL_KINDS, &many("c", 250, "live")).unwrap();
+        assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 250);
+    }
+
+    #[test]
+    fn kinds_outside_the_scope_are_kept() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::Xtream, "s", "http://x", None, None).unwrap();
+        let mut all = many("l", 5, "live");
+        all.extend(many("m", 5, "movie"));
+        replace_channels(&db, sid, ALL_KINDS, &all).unwrap();
+        // The movie list failed to download this time: only live is synced.
+        replace_channels(&db, sid, &["live"], &many("l", 5, "live")).unwrap();
+        assert_eq!(list_channels(&db, Some(sid), None, Some("movie")).unwrap().len(), 5);
+    }
+
+    #[test]
+    fn plain_m3u_urls_never_share_an_xtream_identity() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
+        let list = [ch("A", "http://a.tv/hls/ch/5.m3u8"), ch("B", "http://b.tv/x/y/5.ts")];
+        replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
+        let (a, b) = (id_of(&db, "A"), id_of(&db, "B"));
+        replace_channels(&db, sid, ALL_KINDS, &[list[1].clone(), list[0].clone()]).unwrap();
+        assert_eq!((id_of(&db, "A"), id_of(&db, "B")), (a, b));
+    }
+
     fn id_of(db: &Db, name: &str) -> i64 {
         db.read()
             .query_row("SELECT id FROM channels WHERE name = ?1", [name], |r| r.get(0))
@@ -858,13 +962,13 @@ mod tests {
     fn refresh_keeps_favorites_and_history() {
         let db = test_db();
         let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
-        replace_channels(&db, sid, &[ch("A", "http://h/a"), ch("B", "http://h/b")]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("A", "http://h/a"), ch("B", "http://h/b")]).unwrap();
         let a = id_of(&db, "A");
         toggle_favorite(&db, a).unwrap();
         upsert_watch_progress(&db, a, 100.0, 1000.0, false).unwrap();
 
         // Refresh: A renamed and moved, B dropped, C added.
-        replace_channels(&db, sid, &[ch("C", "http://h/c"), ch("A2", "http://h/a")]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("C", "http://h/c"), ch("A2", "http://h/a")]).unwrap();
 
         assert_eq!(id_of(&db, "A2"), a, "existing channel keeps its id");
         assert_eq!(list_favorites(&db).unwrap().len(), 1);
@@ -880,12 +984,12 @@ mod tests {
     #[test]
     fn xtream_identity_survives_credential_change() {
         let db = test_db();
-        let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
-        replace_channels(&db, sid, &[ch("M", "http://old.host/movie/u/oldpw/42.mkv")]).unwrap();
+        let sid = insert_source(&db, &SourceKind::Xtream, "s", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("M", "http://old.host/movie/u/oldpw/42.mkv")]).unwrap();
         let m = id_of(&db, "M");
         toggle_favorite(&db, m).unwrap();
 
-        replace_channels(&db, sid, &[ch("M", "http://new.host:8080/movie/u/newpw/42.mkv")]).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("M", "http://new.host:8080/movie/u/newpw/42.mkv")]).unwrap();
 
         assert_eq!(id_of(&db, "M"), m);
         assert_eq!(list_favorites(&db).unwrap()[0].stream_url, "http://new.host:8080/movie/u/newpw/42.mkv");
@@ -896,8 +1000,8 @@ mod tests {
         let db = test_db();
         let sid = insert_source(&db, &SourceKind::M3u, "s", "http://x", None, None).unwrap();
         let list = [ch("A", "http://h/a"), ch("A again", "http://h/a")];
-        replace_channels(&db, sid, &list).unwrap();
-        replace_channels(&db, sid, &list).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &list).unwrap();
         assert_eq!(list_channels(&db, Some(sid), None, None).unwrap().len(), 2);
     }
 }

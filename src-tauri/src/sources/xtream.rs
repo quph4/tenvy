@@ -27,6 +27,9 @@ pub struct Catalogue {
     pub live: usize,
     pub movies: usize,
     pub series: usize,
+    /// Kinds that downloaded successfully. Only these may replace stored
+    /// rows — a kind whose fetch failed keeps what we already have.
+    pub kinds: Vec<&'static str>,
 }
 
 impl Xtream {
@@ -109,7 +112,7 @@ impl Xtream {
         let mut channels = Vec::new();
 
         let cats = self.categories("get_live_categories").await?;
-        for s in array(&self.get_json(Some("get_live_streams"), &[]).await?) {
+        for s in &self.get_list("get_live_streams").await? {
             let Some(id) = int(s, "stream_id") else { continue };
             let ext = string(s, "container_extension").unwrap_or_else(|| "m3u8".into());
             channels.push(ChannelInsert {
@@ -123,27 +126,36 @@ impl Xtream {
             });
         }
         let live = channels.len();
+        let mut kinds = vec!["live"];
 
         let movies_before = channels.len();
         match self.fetch_movies().await {
-            Ok(mut m) => channels.append(&mut m),
+            Ok(mut m) => {
+                channels.append(&mut m);
+                kinds.push("movie");
+            }
             Err(e) => tracing::warn!(target: "lumen_lib", "xtream movies unavailable: {}", e),
         }
         let movies = channels.len() - movies_before;
 
         let series_before = channels.len();
         match self.fetch_series().await {
-            Ok(mut s) => channels.append(&mut s),
+            Ok(mut s) => {
+                channels.append(&mut s);
+                kinds.push("series");
+            }
             Err(e) => tracing::warn!(target: "lumen_lib", "xtream series unavailable: {}", e),
         }
         let series = channels.len() - series_before;
 
-        Ok(Catalogue { channels, live, movies, series })
+        Ok(Catalogue { channels, live, movies, series, kinds })
     }
 
     async fn fetch_movies(&self) -> Result<Vec<ChannelInsert>> {
         let cats = self.categories("get_vod_categories").await?;
-        Ok(array(&self.get_json(Some("get_vod_streams"), &[]).await?)
+        Ok(self
+            .get_list("get_vod_streams")
+            .await?
             .iter()
             .filter_map(|s| {
                 let id = int(s, "stream_id")?;
@@ -165,7 +177,9 @@ impl Xtream {
     /// every show's episode list up front would mean thousands of requests.
     async fn fetch_series(&self) -> Result<Vec<ChannelInsert>> {
         let cats = self.categories("get_series_categories").await?;
-        Ok(array(&self.get_json(Some("get_series"), &[]).await?)
+        Ok(self
+            .get_list("get_series")
+            .await?
             .iter()
             .filter_map(|s| {
                 let id = int(s, "series_id")?;
@@ -218,15 +232,32 @@ impl Xtream {
                 })
             })
             .collect();
+        if out.is_empty() {
+            // Most likely a transient panel failure; the caller falls back
+            // to cached episodes rather than wiping them.
+            return Err(err!("The provider returned no episodes for this series."));
+        }
         out.sort_by_key(|e| (e.season.unwrap_or(0), e.episode.unwrap_or(0)));
         Ok(out)
+    }
+
+    /// A list endpoint. An empty body or a non-array response is an error,
+    /// not "zero items": overloaded panels do both, and treating that as an
+    /// empty catalogue would delete the user's channels on refresh.
+    async fn get_list(&self, action: &str) -> Result<Vec<Value>> {
+        match self.get_json(Some(action), &[]).await? {
+            Value::Array(items) => Ok(items),
+            _ => Err(err!("The provider returned no data for {}. Try again later.", action)),
+        }
     }
 
     async fn categories(&self, action: &str) -> Result<HashMap<String, String>> {
         // Names are cleaned with `m3u::clean`: providers pad them with
         // spaces and zero-width characters as sort hacks, which shows up
         // as odd indentation in the sidebar.
-        Ok(array(&self.get_json(Some(action), &[]).await?)
+        Ok(self
+            .get_list(action)
+            .await?
             .iter()
             .filter_map(|c| {
                 Some((string(c, "category_id")?, crate::sources::m3u::clean(&string(c, "category_name")?)))
@@ -286,7 +317,7 @@ pub fn parse_xtream_url(url: &str) -> Option<XtreamUrl> {
     let parsed = reqwest::Url::parse(url).ok()?;
     let segments: Vec<&str> = parsed.path_segments()?.collect();
     let (kind, id_with_ext) = match segments.as_slice() {
-        [kind @ ("movie" | "series" | "live"), _user, _pass, id, ..] => (kind.to_string(), *id),
+        [kind @ ("movie" | "series" | "live"), _user, _pass, id] => (kind.to_string(), *id),
         // Many panels also serve live TV at the short form
         // `/{user}/{pass}/{id}` — no kind segment.
         [_user, _pass, id] => ("live".to_string(), *id),
@@ -304,7 +335,7 @@ fn parse_stream_id(segment: &str) -> Option<i64> {
 /// URL's path, if it has that shape. Used to redact them from logs.
 pub fn credential_segments(segments: &[&str]) -> Option<(usize, usize)> {
     match segments {
-        ["movie" | "series" | "live", _, _, id, ..] if parse_stream_id(id).is_some() => Some((1, 2)),
+        ["movie" | "series" | "live", _, _, id] if parse_stream_id(id).is_some() => Some((1, 2)),
         [_, _, id] if parse_stream_id(id).is_some() => Some((0, 1)),
         _ => None,
     }

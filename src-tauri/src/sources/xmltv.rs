@@ -175,7 +175,9 @@ fn parse_xmltv_time(s: &str) -> Option<i64> {
     if date_part.len() < 14 {
         return None;
     }
-    let naive = chrono::NaiveDateTime::parse_from_str(&date_part[..14], "%Y%m%d%H%M%S").ok()?;
+    // `get`, not indexing: a stray multi-byte character must not panic
+    // (release builds abort on panic).
+    let naive = chrono::NaiveDateTime::parse_from_str(date_part.get(..14)?, "%Y%m%d%H%M%S").ok()?;
     let offset_sec = tz_part
         .and_then(|tz| {
             let sign = match tz.chars().next()? {
@@ -212,6 +214,7 @@ mod tests {
                     .timestamp()
             )
         );
+        assert_eq!(parse_xmltv_time("2026010112000é +0000"), None);
         assert_eq!(
             parse_xmltv_time("20260101120000 +0100"),
             parse_xmltv_time("20260101110000 +0000")

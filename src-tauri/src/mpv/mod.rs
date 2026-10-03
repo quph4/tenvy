@@ -93,6 +93,9 @@ pub struct Mpv {
     tx: mpsc::UnboundedSender<CommandSubmission>,
     state: Arc<Mutex<MpvState>>,
     request_id: Arc<AtomicU64>,
+    /// mpv < 0.38 has no `index` argument in `loadfile`; options follow
+    /// the flags directly. Matters only for an old system mpv fallback.
+    legacy_loadfile: bool,
 }
 
 /// Audio settings to start a fresh mpv instance with.
@@ -216,7 +219,14 @@ impl Mpv {
         );
 
         // mpv takes ~100ms to bind its named pipe.
-        let pipe = connect_pipe(&pipe_name).await?;
+        let mut child = child;
+        let pipe = match connect_pipe(&pipe_name).await {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = child.kill();
+                return Err(e);
+            }
+        };
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<CommandSubmission>();
         let (state_tx, state_rx) = mpsc::unbounded_channel::<MpvState>();
@@ -232,10 +242,25 @@ impl Mpv {
             tx: cmd_tx,
             state,
             request_id: Arc::new(AtomicU64::new(1)),
+            legacy_loadfile: false,
         };
 
         // Register observers so every property we care about pushes events.
-        mpv.observe_properties().await?;
+        if let Err(e) = mpv.observe_properties().await {
+            // The pipe task owns the child now; ask mpv to exit rather
+            // than leave a half-initialised instance running.
+            let _ = mpv.command(&[json!("quit")]).await;
+            return Err(e);
+        }
+        let mut mpv = mpv;
+        let version = mpv
+            .command(&[json!("get_property"), json!("mpv-version")])
+            .await
+            .ok()
+            .and_then(|v| v.get("data").and_then(|d| d.as_str()).map(str::to_string))
+            .unwrap_or_default();
+        mpv.legacy_loadfile = is_pre_0_38(&version);
+        tracing::info!(target: "lumen_lib", "{} (legacy loadfile: {})", version, mpv.legacy_loadfile);
         Ok((mpv, state_rx))
     }
 
@@ -306,7 +331,9 @@ impl Mpv {
         let mut args = vec![json!("loadfile"), json!(url), json!("replace")];
         if !options.is_empty() {
             // index (-1 = unused by `replace`), then the options list.
-            args.push(json!(-1));
+            if !self.legacy_loadfile {
+                args.push(json!(-1));
+            }
             args.push(json!(options.join(",")));
         }
         self.command(&args).await?;
@@ -391,6 +418,33 @@ impl Mpv {
             .await?;
         }
         Ok(())
+    }
+}
+
+/// Parse "mpv v0.37.0-…" / "mpv 0.36.0" and report whether it predates
+/// the `loadfile` index argument (0.38). Unknown versions count as modern.
+fn is_pre_0_38(version: &str) -> bool {
+    let digits = version
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("")
+        .trim_start_matches('v');
+    let mut parts = digits.split(|c: char| !c.is_ascii_digit());
+    match (parts.next().and_then(|m| m.parse::<u32>().ok()), parts.next().and_then(|n| n.parse::<u32>().ok())) {
+        (Some(major), Some(minor)) => major == 0 && minor < 38,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn detects_old_mpv() {
+        assert!(super::is_pre_0_38("mpv v0.37.0-123-gabc Copyright"));
+        assert!(super::is_pre_0_38("mpv 0.35.1"));
+        assert!(!super::is_pre_0_38("mpv v0.41.0-244-gaf9c81fa1"));
+        assert!(!super::is_pre_0_38("mpv v1.0.0"));
+        assert!(!super::is_pre_0_38("garbage"));
     }
 }
 

@@ -101,10 +101,12 @@ export function useKeyboardShortcuts() {
           // Channel zapping only makes sense for live TV in the player
           // view; in the guide the arrows should scroll.
           if (!channel || channel.kind !== 'live' || ui.view !== 'player') return
-          const { channels } = usePlaylist.getState()
-          if (channels.length === 0) return
-          e.preventDefault()
+          // Zap through the live channels on screen; if the playing channel
+          // isn't among them (another tab or group is open), do nothing.
+          const channels = usePlaylist.getState().channels.filter((c) => c.kind === 'live')
           const i = channels.findIndex((c) => c.id === channel.id)
+          if (i === -1) return
+          e.preventDefault()
           const step = e.key.toLowerCase() === 'arrowup' ? -1 : 1
           pb.play(channels[(i + step + channels.length) % channels.length])
           break

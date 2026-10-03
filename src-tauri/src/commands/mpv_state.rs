@@ -36,7 +36,9 @@ pub struct MpvHolder {
 
 #[cfg(windows)]
 pub struct MpvHandles {
-    pub mpv: crate::mpv::Mpv,
+    /// None until mpv has started successfully (or after a failed start);
+    /// the child window outlives individual mpv instances.
+    pub mpv: Option<crate::mpv::Mpv>,
     pub child_hwnd: isize,
     /// Last volume/mute the frontend asked for, re-applied on respawn.
     pub audio: crate::mpv::InitialAudio,
@@ -203,7 +205,7 @@ pub async fn mpv_stop(holder: State<'_, MpvHolder>) -> Result<()> {
     #[cfg(windows)]
     {
         // Stopping a dead mpv is already done — don't respawn just for this.
-        let mpv = holder.inner.lock().await.as_ref().map(|h| h.mpv.clone());
+        let mpv = holder.inner.lock().await.as_ref().and_then(|h| h.mpv.clone());
         match mpv {
             Some(mpv) if mpv.is_alive() => mpv.stop().await,
             _ => Ok(()),
@@ -296,18 +298,22 @@ async fn ensure_mpv(app: &AppHandle, holder: &MpvHolder) -> Result<crate::mpv::M
     use tauri::{Emitter, Manager};
 
     let mut slot = holder.inner.lock().await;
-    if let Some(h) = slot.as_ref() {
-        if h.mpv.is_alive() {
-            return Ok(h.mpv.clone());
+    if let Some(mpv) = slot.as_ref().and_then(|h| h.mpv.as_ref()) {
+        if mpv.is_alive() {
+            return Ok(mpv.clone());
         }
         tracing::warn!(target: "lumen_lib", "mpv is not running; respawning");
     }
 
-    let child_hwnd = match slot.as_ref() {
-        Some(h) => h.child_hwnd,
-        None => create_child_window(app).await?,
-    };
-    let audio = slot.as_ref().map(|h| h.audio).unwrap_or_default();
+    // Create the window once and record it before spawning, so a failed
+    // spawn (mpv missing, pipe timeout) is retried into the same window
+    // instead of creating a new one on every call.
+    if slot.is_none() {
+        let child_hwnd = create_child_window(app).await?;
+        *slot = Some(MpvHandles { mpv: None, child_hwnd, audio: Default::default() });
+    }
+    let handles = slot.as_mut().expect("just set");
+    let (child_hwnd, audio) = (handles.child_hwnd, handles.audio);
 
     // The installer ships mpv under resources/mpv/; dev builds without it
     // fall back to a system install.
@@ -328,14 +334,20 @@ async fn ensure_mpv(app: &AppHandle, holder: &MpvHolder) -> Result<crate::mpv::M
             let _ = app_for_events.emit("mpv://state", &state);
         }
         let holder = app_for_events.state::<MpvHolder>();
-        let current = holder.inner.lock().await.as_ref().map(|h| h.mpv.same_instance(&this));
+        let current = holder
+            .inner
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|h| h.mpv.as_ref())
+            .map(|m| m.same_instance(&this));
         if current == Some(true) {
             tracing::error!(target: "lumen_lib", "mpv exited unexpectedly");
             let _ = app_for_events.emit("mpv://event", &serde_json::json!({ "kind": "crashed" }));
         }
     });
 
-    *slot = Some(MpvHandles { mpv: mpv.clone(), child_hwnd, audio });
+    handles.mpv = Some(mpv.clone());
     Ok(mpv)
 }
 

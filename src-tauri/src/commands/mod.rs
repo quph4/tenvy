@@ -141,7 +141,7 @@ async fn ingest_m3u(app: &AppHandle, state: &State<'_, AppState>, source: &Sourc
     emit_progress(app, source.id, "storing", count);
     let db = state.db.clone();
     let sid = source.id;
-    tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, &channels)).await??;
+    tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, db::ALL_KINDS, &channels)).await??;
 
     // `#EXTM3U url-tvg="…"` names the playlist's own guide. Failing that,
     // an Xtream `get.php` playlist has the panel's guide at `xmltv.php`.
@@ -172,7 +172,10 @@ async fn ingest_xtream(
     emit_progress(app, source.id, "storing", catalogue.channels.len() as i64);
     let db = state.db.clone();
     let sid = source.id;
-    tokio::task::spawn_blocking(move || db::replace_channels(&db, sid, &catalogue.channels)).await??;
+    tokio::task::spawn_blocking(move || {
+        db::replace_channels(&db, sid, &catalogue.kinds, &catalogue.channels)
+    })
+    .await??;
 
     // The provider's guide can be tens of MB; don't hold the UI for it.
     refresh_guide_in_background(app.clone(), state.db.clone(), state.http.clone(), xt.xmltv_url(), sid);

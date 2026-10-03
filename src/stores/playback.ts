@@ -49,6 +49,9 @@ interface PlaybackState {
   /** VOD the user clicked on that has a resumable saved position. The
    *  app-level modal watches this and asks Resume vs. Beginning. */
   pendingResume: { channel: Channel; savedSeconds: number } | null
+  /** Bumped on every `play`, so re-picking the channel that is already
+   *  playing (e.g. "Start from beginning") still reloads it. */
+  playNonce: number
 
   // ---- actions ----
   /** Low-level: play this channel, optionally seeking to `startSeconds`
@@ -95,12 +98,14 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
 
   pendingStart: null,
   pendingResume: null,
+  playNonce: 0,
 
   // Reset probed track prefs on channel change — they're per-file. We also
   // clear the mpv mirror so the UI doesn't flash the outgoing file's
   // duration/position while the new load happens.
   play: (ch, startSeconds = null) =>
-    set({
+    set((s) => ({
+      playNonce: s.playNonce + 1,
       channel: ch,
       playing: true,
       pendingStart: startSeconds,
@@ -113,7 +118,7 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       currentSubtitle: null,
       preferredAudioTrack: null,
       preferredSubtitleTrack: null,
-    }),
+    })),
 
   requestPlay: (ch) => {
     const isVod = ch.kind === 'movie' || ch.kind === 'series'

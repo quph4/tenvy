@@ -198,3 +198,26 @@ export async function onPlaylistProgress(
     handler(e.payload),
   )
 }
+
+/**
+ * Attach a Tauri event listener from a React effect: returns a synchronous
+ * cleanup. `listen()` resolves asynchronously, so if the effect is torn
+ * down first (StrictMode, fast unmount) the listener is removed as soon as
+ * it arrives instead of leaking.
+ */
+export function subscribe(attach: () => Promise<UnlistenFn>): () => void {
+  let disposed = false
+  let unlisten: UnlistenFn | null = null
+  attach()
+    .then((fn) => {
+      if (disposed) fn()
+      else unlisten = fn
+    })
+    .catch(() => {
+      /* non-fatal — the UI just won't live-update from this event */
+    })
+  return () => {
+    disposed = true
+    unlisten?.()
+  }
+}
