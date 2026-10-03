@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import { Bell, Heart, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Bell, Heart, Pencil, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
 import { usePlaylist } from '../../stores/playlist'
 import { useIngest } from '../../stores/ingest'
@@ -97,7 +97,7 @@ export function SettingsPanel() {
                 className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2 text-sm"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-neutral-200">{s.name}</div>
+                  <SourceName id={s.id} name={s.name} onRenamed={() => hydrate().catch(() => {})} />
                   <div className="truncate text-[11px] text-neutral-500">
                     {s.kind.toUpperCase()} · {new URL(s.url.startsWith('http') ? s.url : 'file://' + s.url).hostname || s.url}
                   </div>
@@ -201,6 +201,61 @@ function AboutSection() {
         </div>
       )}
     </div>
+  )
+}
+
+/** A provider's name; click (or the pencil) to rename it in place. */
+function SourceName({ id, name, onRenamed }: { id: number; name: string; onRenamed(): void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(name)
+  const push = useToast((s) => s.push)
+
+  const save = async () => {
+    const next = value.trim()
+    setEditing(false)
+    if (!next || next === name) return setValue(name)
+    try {
+      await ipc.renameSource(id, next)
+      onRenamed()
+    } catch (e) {
+      setValue(name)
+      push('error', String(e).replace(/^Error:\s*/, ''))
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={value}
+        maxLength={60}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') {
+            e.stopPropagation()
+            setValue(name)
+            setEditing(false)
+          }
+        }}
+        onFocus={(e) => e.target.select()}
+        className="-mx-1 h-6 w-full rounded border border-accent-400 bg-neutral-950 px-1 text-sm text-neutral-100 outline-none"
+      />
+    )
+  }
+  return (
+    <button
+      onClick={() => {
+        setValue(name)
+        setEditing(true)
+      }}
+      title="Rename"
+      className="group/name flex max-w-full items-center gap-1.5 text-left text-neutral-200 hover:text-white"
+    >
+      <span className="truncate">{name}</span>
+      <Pencil className="h-3 w-3 shrink-0 text-neutral-600 opacity-0 transition-opacity group-hover/name:opacity-100" />
+    </button>
   )
 }
 

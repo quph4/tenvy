@@ -263,6 +263,11 @@ pub fn insert_source(
     Ok(conn.last_insert_rowid())
 }
 
+pub fn rename_source(db: &Db, id: i64, name: &str) -> Result<()> {
+    db.write().execute("UPDATE sources SET name = ?2 WHERE id = ?1", params![id, name])?;
+    Ok(())
+}
+
 /// Turn an M3U source that points at an Xtream panel's get.php into a
 /// proper Xtream source. The API gives series as shows (not hundreds of
 /// thousands of loose episodes), cleaner categories and library metadata.
@@ -1331,5 +1336,13 @@ mod tests {
         assert!(japan.hidden && !japan.locked);
         set_group_prefs(&db, sid, "live", &["Japan".into()], Some(false), None).unwrap();
         assert_eq!(list_channels(&db, Some(sid), None, None, false).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn sources_can_be_renamed() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "test", "http://x", None, None).unwrap();
+        rename_source(&db, sid, "Living room").unwrap();
+        assert_eq!(get_source(&db, sid).unwrap().unwrap().name, "Living room");
     }
 }

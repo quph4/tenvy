@@ -80,6 +80,7 @@ pub fn run() {
             commands::add_source,
             commands::refresh_source,
             commands::remove_source,
+            commands::rename_source,
             commands::list_groups,
             commands::list_channels,
             commands::search_channels,

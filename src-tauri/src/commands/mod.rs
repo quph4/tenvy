@@ -106,6 +106,17 @@ pub async fn refresh_source(
 }
 
 #[tauri::command]
+pub async fn rename_source(state: State<'_, AppState>, id: i64, name: String) -> Result<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(err!("Give it a name."));
+    }
+    let name: String = name.chars().take(60).collect();
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::rename_source(&db, id, &name)).await?
+}
+
+#[tauri::command]
 pub async fn remove_source(state: State<'_, AppState>, id: i64) -> Result<()> {
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || db::delete_source(&db, id)).await?

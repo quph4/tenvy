@@ -262,6 +262,8 @@ const reminders: { channelId: number; start: number; stop: number; title: string
 
 // ---------- IPC ----------
 
+let sourceName = 'My provider'
+
 type Args = Record<string, any>
 
 function listChannels({ group, kind }: Args): Channel[] {
@@ -289,7 +291,10 @@ function handle(cmd: string, a: Args = {}): unknown {
   switch (cmd) {
     case 'list_sources':
       if (new URLSearchParams(location.search).get('scene') === 'welcome') return []
-      return [{ id: 1, kind: 'xtream', name: 'My provider', url: 'http://line.example.com', updatedAt: now - 600 }]
+      return [{ id: 1, kind: 'xtream', name: sourceName, url: 'http://line.example.com', updatedAt: now - 600 }]
+    case 'rename_source':
+      sourceName = a.name
+      return null
     case 'list_groups':
       return groups(a)
     case 'list_channels':

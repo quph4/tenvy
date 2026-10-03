@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Rename a provider in Settings (click its name).
 - Home: continue watching, recently watched and favorite channels (with
   what's on), favorite films and series, and the newest movies and
   series — plus your subscription status at a glance.

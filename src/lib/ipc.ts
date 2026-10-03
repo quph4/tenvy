@@ -38,6 +38,9 @@ export const ipc = {
   async refreshSource(id: number): Promise<void> {
     return invoke('refresh_source', { id })
   },
+  async renameSource(id: number, name: string): Promise<void> {
+    return invoke('rename_source', { id, name })
+  },
   async removeSource(id: number): Promise<void> {
     return invoke('remove_source', { id })
   },
