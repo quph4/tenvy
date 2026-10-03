@@ -1,5 +1,5 @@
 import type { Channel } from '../types'
-import { FAVORITES_GROUP, usePlaylist } from '../stores/playlist'
+import { FAVORITES_GROUP, HISTORY_GROUP, usePlaylist } from '../stores/playlist'
 
 /**
  * How the live list is ordered. "added" is the provider's order; "name"
@@ -50,7 +50,8 @@ export function separatorTitle(name: string): string {
 export function liveChannels(): Channel[] {
   const pl = usePlaylist.getState()
   const live = pl.channels.filter((c) => c.kind === 'live' && !isSeparator(c))
-  return sortChannels(live, savedSort(), pl.activeGroup === FAVORITES_GROUP)
+  // Favorites keep their own order and History its most-recent-first.
+  return sortChannels(live, savedSort(), pl.activeGroup === FAVORITES_GROUP || pl.activeGroup === HISTORY_GROUP)
 }
 
 /** 1-based channel number in the current list, or null. */

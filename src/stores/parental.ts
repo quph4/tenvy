@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ipc } from '../lib/ipc'
 import type { ParentalStatus } from '../types'
 import { usePlaylist } from './playlist'
+import { usePlayback } from './playback'
 
 /**
  * Parental PIN. Categories marked locked stay out of lists, search and
@@ -67,6 +68,12 @@ export const useParental = create<ParentalState>((set, get) => ({
     await ipc.parentalLock()
     await get().refresh()
     reloadLists()
+    // Locking also ends a locked channel that's on screen.
+    const pb = usePlayback.getState()
+    if (pb.channel && (await ipc.isChannelLocked(pb.channel.id).catch(() => false))) {
+      pb.stop()
+      ipc.mpvStop().catch(() => {})
+    }
   },
 
   async setPin(current, next) {

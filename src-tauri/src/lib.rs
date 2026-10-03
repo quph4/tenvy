@@ -97,6 +97,7 @@ pub fn run() {
             commands::parental_status,
             commands::parental_unlock,
             commands::parental_lock,
+            commands::is_channel_locked,
             commands::set_parental_pin,
             commands::recently_added,
             commands::account_info,

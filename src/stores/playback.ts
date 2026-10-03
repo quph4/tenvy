@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { ipc } from '../lib/ipc'
 import { enterMiniWindow, exitMiniWindow } from '../lib/miniWindow'
 import { isResumable, useHistory } from './history'
-import { usePlaylist } from './playlist'
+import { FAVORITES_GROUP, HISTORY_GROUP, usePlaylist } from './playlist'
 import { useUI } from './ui'
 
 /**
@@ -140,7 +140,8 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
     const ui = useUI.getState()
     if (ui.view === 'home') ui.setView('player')
     const pl = usePlaylist.getState()
-    if (pl.activeKind !== ch.kind) pl.setActiveKind(ch.kind).catch(() => {})
+    const ownList = pl.activeGroup === FAVORITES_GROUP || pl.activeGroup === HISTORY_GROUP
+    if (pl.activeKind !== ch.kind && !ownList) pl.setActiveKind(ch.kind).catch(() => {})
     set((s) => ({
       playNonce: s.playNonce + 1,
       catchup: null,

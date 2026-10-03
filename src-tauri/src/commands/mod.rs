@@ -650,6 +650,12 @@ pub(crate) async fn ensure_playable(state: &AppState, channel_id: i64) -> Result
     Ok(())
 }
 
+/// True when the channel is in a locked category and the PIN isn't entered.
+#[tauri::command]
+pub async fn is_channel_locked(state: State<'_, AppState>, channel_id: i64) -> Result<bool> {
+    Ok(ensure_playable(&state, channel_id).await.is_err())
+}
+
 /// Newest movies or series, for Home.
 #[tauri::command]
 pub async fn recently_added(state: State<'_, AppState>, kind: String, limit: i64) -> Result<Vec<Channel>> {
@@ -796,6 +802,7 @@ pub async fn open_external(
     subtitle_track: Option<i64>,
 ) -> Result<String> {
     use tauri::Manager;
+    ensure_playable(&state, channel_id).await?;
     let db = state.db.clone();
     let playback = tokio::task::spawn_blocking(move || db::get_playback(&db, channel_id))
         .await??

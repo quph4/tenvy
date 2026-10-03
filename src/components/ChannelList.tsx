@@ -160,18 +160,25 @@ function FlatList({
   const parentRef = useRef<HTMLDivElement>(null)
   // Channel numbers as ↑/↓ and the digit keys see them: section titles
   // don't count.
+  // Only live channels are numbered — films in Favorites aren't zappable.
   const numbers = useMemo(() => {
     const m = new Map<number, number>()
     let n = 0
-    for (const c of channels) if (!isSeparator(c)) m.set(c.id, ++n)
+    for (const c of channels) if (c.kind === 'live' && !isSeparator(c)) m.set(c.id, ++n)
     return m
   }, [channels])
   const virt = useVirtualizer({
     count: channels.length,
     getScrollElement: () => parentRef.current,
+    getItemKey: (i) => channels[i].id,
     estimateSize: (i) => (isSeparator(channels[i]) ? SEPARATOR_HEIGHT : ROW_HEIGHT),
     overscan: 10,
   })
+  // Row heights depend on which rows are headings; re-measure when the
+  // order changes even if the count doesn't (sorting A–Z).
+  useEffect(() => {
+    virt.measure()
+  }, [channels, virt])
 
   return (
     <div ref={parentRef} className="flex-1 overflow-y-auto">

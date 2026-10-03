@@ -216,8 +216,18 @@ export const ipc = {
   },
   /** Play a past or ongoing programme from the provider's archive.
    *  `start`/`stop` are the programme's epoch seconds from the guide. */
-  async mpvLoadCatchup(channelId: number, start: number, stop: number, prefs?: TrackPrefs): Promise<void> {
-    return invoke('mpv_load_catchup', { channelId, start, stop, prefs: prefs ?? null })
+  async mpvLoadCatchup(
+    channelId: number,
+    start: number,
+    stop: number,
+    prefs?: TrackPrefs,
+    startSeconds: number | null = null,
+  ): Promise<void> {
+    return invoke('mpv_load_catchup', { channelId, start, stop, prefs: prefs ?? null, startSeconds })
+  },
+  /** Whether a channel is in a locked category (and locked right now). */
+  async isChannelLocked(channelId: number): Promise<boolean> {
+    return invoke('is_channel_locked', { channelId })
   },
   /** Change a picture/sound setting (aspect, delays, speed); see mpv_adjust. */
   async mpvAdjust(name: string, value: number | string | boolean): Promise<void> {

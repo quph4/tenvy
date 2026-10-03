@@ -37,14 +37,21 @@ const LIVE_WATCHED_MS = 10_000
  * a crash) at the last known position instead of consuming the one-shot
  * `pendingStart` from the Resume prompt.
  */
-function openCurrent(push: (kind: 'error' | 'info', message: string) => void, resume: boolean) {
+function openCurrent(
+  push: (kind: 'error' | 'info', message: string) => void,
+  resume: boolean,
+  /** Where to pick up when reopening (the keeper's last good position);
+   *  mpv's own position is gone once the stream has dropped. */
+  resumeAt: number | null = null,
+) {
   const pb = usePlayback.getState()
   const channel = pb.channel
   if (!channel) return
   const vod = channel.kind === 'movie' || channel.kind === 'series'
   let start: number | null
   if (resume) {
-    start = vod ? pb.timePos : null
+    // Films and catch-up continue where they were; live joins live.
+    start = vod || pb.catchup ? (resumeAt ?? pb.timePos) : null
   } else {
     start = pb.pendingStart
     pb.consumePendingStart()
@@ -52,7 +59,7 @@ function openCurrent(push: (kind: 'error' | 'info', message: string) => void, re
   const prefs = useTvPrefs.getState().tracks
   const catchup = pb.catchup
   const open = catchup
-    ? ipc.mpvLoadCatchup(channel.id, catchup.start, catchup.stop, prefs)
+    ? ipc.mpvLoadCatchup(channel.id, catchup.start, catchup.stop, prefs, start)
     : ipc.mpvLoad(channel.id, start, prefs)
   open
     // mpv's pause flag survives loadfile — a new channel picked while the
@@ -117,7 +124,7 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
         timer = undefined
         if (usePlayback.getState().playNonce !== n) return
         lastProgress = Date.now()
-        openCurrent(push, true)
+        openCurrent(push, true, lastPos)
       }, ms)
     }
 
@@ -134,7 +141,7 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
               attempts = 0
               gaveUp = false
               lastProgress = Date.now()
-              openCurrent(push, true)
+              openCurrent(push, true, lastPos)
             },
           },
         })
@@ -155,6 +162,8 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
         openRetried = true
         return reopenAfter(RETRY_DELAY_MS)
       }
+      // Said once; the watchdog stays quiet until the next pick.
+      gaveUp = true
       if (s.catchup) {
         // Seen in practice: channels flagged as archived whose recordings
         // the panel answers with an empty page.
@@ -205,7 +214,10 @@ function useConnectionKeeper(push: ReturnType<typeof useToast.getState>['push'])
 
     const interval = window.setInterval(tick, 1000)
     const unsubscribe = usePlayback.subscribe((s, prev) => {
-      if (s.errorSeq !== prev.errorSeq && s.channel) failedToOpen()
+      if (s.errorSeq === prev.errorSeq || !s.channel) return
+      // A fast failure right after a switch belongs to the new pick.
+      if (s.playNonce !== nonce) reset(s.playNonce)
+      failedToOpen()
     })
     return () => {
       window.clearInterval(interval)

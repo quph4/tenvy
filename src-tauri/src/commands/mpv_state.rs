@@ -150,6 +150,7 @@ pub async fn mpv_load_catchup(
     start: i64,
     stop: i64,
     prefs: Option<TrackPrefs>,
+    start_seconds: Option<f64>,
 ) -> Result<()> {
     super::ensure_playable(&state, channel_id).await?;
     let options = prefs.unwrap_or_default().file_options();
@@ -162,12 +163,12 @@ pub async fn mpv_load_catchup(
     {
         ensure_mpv(&app, &holder)
             .await?
-            .load(&url, None, playback.user_agent.as_deref(), playback.referrer.as_deref(), &options)
+            .load(&url, start_seconds, playback.user_agent.as_deref(), playback.referrer.as_deref(), &options)
             .await
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, holder, url, playback, options);
+        let _ = (app, holder, url, playback, options, start_seconds);
         Err(err!("embedded mpv is only supported on Windows right now"))
     }
 }

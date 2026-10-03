@@ -796,11 +796,11 @@ pub fn is_locked(db: &Db, channel_id: i64) -> Result<bool> {
 
 pub fn list_favorites(db: &Db, unlocked: bool) -> Result<Vec<Channel>> {
     let conn = db.read();
-    let filter = visibility_clause(false, unlocked).map(|c| format!("WHERE {c}")).unwrap_or_default();
+    let filter = visibility_clause(false, unlocked).map(|c| format!("AND {c}")).unwrap_or_default();
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHANNEL_COLS}
            FROM favorites f JOIN channels c ON c.id = f.channel_id
-           {filter}
+          WHERE 1 = 1 {filter} {HIDDEN_CHANNEL_FILTER}
            ORDER BY f.position, f.added_at DESC"
     ))?;
     let rows = stmt
@@ -1415,6 +1415,11 @@ mod tests {
         assert_eq!(names(list_hidden_channels(&db).unwrap()), ["B"]);
         set_channel_hidden(&db, b, false).unwrap();
         assert_eq!(list_channels(&db, Some(sid), None, None, true).unwrap().len(), 3);
+        toggle_favorite(&db, a).unwrap();
+        set_channel_hidden(&db, a, true).unwrap();
+        assert!(list_favorites(&db, true).unwrap().is_empty());
+        set_channel_hidden(&db, a, false).unwrap();
+        toggle_favorite(&db, a).unwrap();
 
         for id in [a, b, c] {
             toggle_favorite(&db, id).unwrap();
