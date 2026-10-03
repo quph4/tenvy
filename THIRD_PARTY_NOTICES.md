@@ -1,7 +1,7 @@
 # Third-party software
 
-Qanal bundles the following independently licensed programs. They run as
-separate processes and are distributed alongside Qanal, not linked into it.
+Tenvy bundles the following independently licensed programs. They run as
+separate processes and are distributed alongside Tenvy, not linked into it.
 
 ## mpv
 
@@ -12,7 +12,7 @@ separate processes and are distributed alongside Qanal, not linked into it.
 
 The exact mpv version shipped is printed by `mpv/mpv.exe --version` in the
 install directory. The corresponding source code is available at the links
-above; a copy for the shipped version can also be requested from the Qanal
+above; a copy for the shipped version can also be requested from the Tenvy
 publisher.
 
 <!-- TODO before first public release: include the full mpv license text
@@ -21,6 +21,6 @@ publisher.
 
 ## Frontend and Rust dependencies
 
-Qanal's own JavaScript and Rust dependencies are permissively licensed
+Tenvy's own JavaScript and Rust dependencies are permissively licensed
 (MIT / Apache-2.0 / BSD / ISC / Zlib / Unicode). A generated list can be
 produced with `cargo about` (Rust) and `pnpm licenses list` (JavaScript).

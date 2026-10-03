@@ -363,7 +363,7 @@ function PlayerEmpty({ error }: { error: string | null }) {
             <div className="mt-1 break-words opacity-80">{error}</div>
             <div className="mt-2 text-red-400/80">
               Install mpv (add `mpv.exe` to PATH or C:\Program Files\mpv\) and
-              restart Qanal.
+              restart Tenvy.
             </div>
           </div>
         )}

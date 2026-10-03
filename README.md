@@ -1,10 +1,10 @@
-# Qanal – IPTV Player for Windows
+# Tenvy – IPTV Player for Windows
 
 Lightweight Windows IPTV player — Tauri 2 + React + TypeScript. TiviMate-style
 grid EPG, M3U / Xtream Codes / XMLTV sources, and embedded mpv for playback so
 every codec (HEVC, AC-3, DTS, PGS subs, MKV alternate audio) Just Works.
 
-Qanal is a player only: it ships no channels or content. Users bring their own
+Tenvy is a player only: it ships no channels or content. Users bring their own
 playlist from their own provider.
 
 ## Requirements
@@ -22,8 +22,8 @@ pnpm install
 pnpm tauri dev
 ```
 
-Set `QANAL_MPV_LOG=1` to make release builds write `%TEMP%\qanal-mpv.log`
-(debug builds always do), and `QANAL_HWDEC=no` to rule out hardware decoding.
+Set `TENVY_MPV_LOG=1` to make release builds write `%TEMP%\tenvy-mpv.log`
+(debug builds always do), and `TENVY_HWDEC=no` to rule out hardware decoding.
 
 ## Test
 

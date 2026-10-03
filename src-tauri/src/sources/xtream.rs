@@ -134,7 +134,7 @@ impl Xtream {
                 channels.append(&mut m);
                 kinds.push("movie");
             }
-            Err(e) => tracing::warn!(target: "qanal_lib", "xtream movies unavailable: {}", e),
+            Err(e) => tracing::warn!(target: "tenvy_lib", "xtream movies unavailable: {}", e),
         }
         let movies = channels.len() - movies_before;
 
@@ -144,7 +144,7 @@ impl Xtream {
                 channels.append(&mut s);
                 kinds.push("series");
             }
-            Err(e) => tracing::warn!(target: "qanal_lib", "xtream series unavailable: {}", e),
+            Err(e) => tracing::warn!(target: "tenvy_lib", "xtream series unavailable: {}", e),
         }
         let series = channels.len() - series_before;
 

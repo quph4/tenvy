@@ -1,6 +1,6 @@
 # Bundled mpv
 
-The installer ships mpv from this folder; Qanal runs `mpv/mpv.exe` from
+The installer ships mpv from this folder; Tenvy runs `mpv/mpv.exe` from
 its resource directory before falling back to a system install.
 
 The binaries are not committed. Populate the folder before `pnpm tauri build`:

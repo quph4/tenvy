@@ -19,7 +19,7 @@
   owner/name of the public releases repo.
 #>
 param(
-  [string]$Repo = 'quph4/qanal-releases',
+  [string]$Repo = 'quph4/tenvy-releases',
   [switch]$Publish
 )
 $ErrorActionPreference = 'Stop'
@@ -27,7 +27,7 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '..')
 $version = (Get-Content (Join-Path $root 'package.json') -Raw | ConvertFrom-Json).version
 $tag = "v$version"
 $bundle = Join-Path $root 'src-tauri\target\release\bundle\nsis'
-$installerName = "Qanal_${version}_x64-setup.exe"
+$installerName = "Tenvy_${version}_x64-setup.exe"
 $installer = Join-Path $bundle $installerName
 $sig = "$installer.sig"
 foreach ($f in @($installer, $sig)) {
@@ -57,10 +57,10 @@ $latestPath = Join-Path $bundle 'latest.json'
 [IO.File]::WriteAllText($latestPath, ($latest | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
 
 $notesFile = Join-Path $bundle 'release-notes.md'
-[IO.File]::WriteAllText($notesFile, ($(if ($notes) { $notes } else { "Qanal $tag" })), (New-Object Text.UTF8Encoding $false))
+[IO.File]::WriteAllText($notesFile, ($(if ($notes) { $notes } else { "Tenvy $tag" })), (New-Object Text.UTF8Encoding $false))
 
 $ghArgs = @('release', 'create', $tag, $installer, $latestPath,
-  '--repo', $Repo, '--title', "Qanal $tag", '--notes-file', $notesFile)
+  '--repo', $Repo, '--title', "Tenvy $tag", '--notes-file', $notesFile)
 if (-not $Publish) { $ghArgs += '--draft' }
 gh @ghArgs
 if ($LASTEXITCODE) { throw 'gh release create failed' }

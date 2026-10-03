@@ -15,13 +15,13 @@ use commands::AppState;
 
 /// Initialise tracing with a stderr layer (dev console) and a rolling file
 /// layer (shipping builds). The file layer writes one log per day to
-/// `%APPDATA%\Qanal\logs\` on Windows — when users report "playback hangs"
+/// `%APPDATA%\Tenvy\logs\` on Windows — when users report "playback hangs"
 /// we can ask for the latest file and actually have breadcrumbs instead of
 /// guessing. Falls back to stderr-only if the directory can't be resolved.
 fn init_tracing() {
     let filter = || {
         EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("qanal_lib=info,warn"))
+            .unwrap_or_else(|_| EnvFilter::new("tenvy_lib=info,warn"))
     };
 
     let stderr_layer = tracing_subscriber::fmt::layer()
@@ -30,13 +30,13 @@ fn init_tracing() {
 
     let log_dir = std::env::var_os("APPDATA")
         .map(std::path::PathBuf::from)
-        .map(|p| p.join("Qanal").join("logs"));
+        .map(|p| p.join("Tenvy").join("logs"));
 
     let file_layer = log_dir
         .as_ref()
         .and_then(|dir| std::fs::create_dir_all(dir).ok().map(|_| dir))
         .map(|dir| {
-            let appender = tracing_appender::rolling::daily(dir, "qanal.log");
+            let appender = tracing_appender::rolling::daily(dir, "tenvy.log");
             tracing_subscriber::fmt::layer()
                 .with_writer(appender)
                 .with_ansi(false)
@@ -62,7 +62,7 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .expect("app data dir");
-            let db_path = dir.join("qanal.db");
+            let db_path = dir.join("tenvy.db");
             let db = db::open(&db_path).expect("open db");
             app.manage(AppState::new(db));
 

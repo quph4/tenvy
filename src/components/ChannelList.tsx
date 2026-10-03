@@ -32,7 +32,7 @@ export function ChannelList() {
   // search can open a show directly.
   const openShowKey = usePlaylist((s) => s.openShowKey)
   const setOpenShowKey = usePlaylist((s) => s.setOpenShowKey)
-  const [sort, setSort] = usePref<SortMode>('qanal.channels.sort', 'added')
+  const [sort, setSort] = usePref<SortMode>('tenvy.channels.sort', 'added')
 
   const sortedChannels = useMemo(() => sortChannels(channels, sort), [channels, sort])
 

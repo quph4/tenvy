@@ -1,13 +1,13 @@
 # Builds a signed Windows installer when a version tag is pushed and
 # uploads it, with the latest.json the in-app updater reads, as a DRAFT
-# release in the public releases repo (quph4/qanal-releases). Smoke-test
+# release in the public releases repo (quph4/tenvy-releases). Smoke-test
 # the draft, then publish it to roll the update out.
 #
 # Required repository settings (see RELEASING.md):
-#   secrets.TAURI_SIGNING_PRIVATE_KEY           contents of qanal-updater.key
+#   secrets.TAURI_SIGNING_PRIVATE_KEY           contents of tenvy-updater.key
 #   secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (may be empty)
 #   secrets.RELEASES_TOKEN                      fine-grained token, Contents: read & write
-#                                               on quph4/qanal-releases
+#                                               on quph4/tenvy-releases
 #   vars.MPV_URL / vars.MPV_SHA256              pinned mpv 7z build to bundle
 name: release
 
@@ -55,7 +55,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm tauri build
 
-      - name: Draft release in qanal-releases
+      - name: Draft release in tenvy-releases
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}

@@ -9,10 +9,10 @@
   .github/workflows/release.yml.
 
 .PARAMETER KeyPath
-  Updater private key. Defaults to %USERPROFILE%\.tauri\qanal-updater.key.
+  Updater private key. Defaults to %USERPROFILE%\.tauri\tenvy-updater.key.
 #>
 param(
-  [string]$KeyPath = (Join-Path $env:USERPROFILE '.tauri\qanal-updater.key')
+  [string]$KeyPath = (Join-Path $env:USERPROFILE '.tauri\tenvy-updater.key')
 )
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..')

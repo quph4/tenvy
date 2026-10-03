@@ -25,7 +25,7 @@ impl AppState {
         Self {
             db,
             http: reqwest::Client::builder()
-                .user_agent(concat!("Qanal/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!("Tenvy/", env!("CARGO_PKG_VERSION")))
                 // No overall timeout: big playlists and XMLTV files on slow
                 // links legitimately take minutes. Instead give up on a
                 // dead connection or a stalled transfer.
@@ -165,7 +165,7 @@ async fn ingest_xtream(
     let xt = Xtream::new(&source.url, username, password, state.http.clone())?;
     let catalogue = xt.fetch_catalogue().await?;
     tracing::info!(
-        target: "qanal_lib",
+        target: "tenvy_lib",
         "xtream catalogue: {} live, {} movies, {} series",
         catalogue.live, catalogue.movies, catalogue.series
     );
@@ -209,11 +209,11 @@ fn refresh_guide_in_background(app: AppHandle, db: Db, http: reqwest::Client, ur
         .await;
         match result {
             Ok(n) => {
-                tracing::info!(target: "qanal_lib", "guide for source {}: {} programmes", source_id, n);
+                tracing::info!(target: "tenvy_lib", "guide for source {}: {} programmes", source_id, n);
                 let _ = app.emit("guide-updated", source_id);
             }
             Err(e) => tracing::warn!(
-                target: "qanal_lib",
+                target: "tenvy_lib",
                 "guide for source {} ({}) failed: {}",
                 source_id,
                 crate::sources::stream_url::redact(&url),
@@ -331,7 +331,7 @@ pub async fn list_episodes(state: State<'_, AppState>, channel_id: i64) -> Resul
             if cached.is_empty() {
                 Err(e)
             } else {
-                tracing::warn!(target: "qanal_lib", "episodes for {} served from cache: {}", channel_id, e);
+                tracing::warn!(target: "tenvy_lib", "episodes for {} served from cache: {}", channel_id, e);
                 Ok(cached)
             }
         }
@@ -483,7 +483,7 @@ pub async fn open_external(
             match subtitle_track {
                 Some(s) => cmd.arg(format!("--sid={}", s)),
                 // Explicit --sid=no so mpv doesn't auto-pick a sub when the
-                // user chose "Off" in Qanal.
+                // user chose "Off" in Tenvy.
                 None => cmd.arg("--sid=no"),
             };
             if let Some(ua) = &playback.user_agent {
@@ -517,7 +517,7 @@ pub async fn open_external(
             .spawn()
             .map_err(|e| err!("Failed to launch {}: {}", player.display(), e))?;
         tracing::info!(
-            target: "qanal_lib",
+            target: "tenvy_lib",
             "launched external player: {} url={} (aid={:?}, sid={:?})",
             player.display(),
             crate::sources::stream_url::redact(&url),

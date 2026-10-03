@@ -47,7 +47,7 @@ pub fn set_event_sink(tx: mpsc::UnboundedSender<HwndEvent>) {
 }
 
 /// Class name for the mpv host window. Registered lazily.
-const CLASS_NAME: &str = "QanalMpvHost\0";
+const CLASS_NAME: &str = "TenvyMpvHost\0";
 
 static CLASS_REGISTERED: AtomicBool = AtomicBool::new(false);
 
@@ -84,7 +84,7 @@ fn ensure_class_registered() {
         if atom == 0 {
             // ERROR_CLASS_ALREADY_EXISTS is fine; anything else would
             // surface on CreateWindowExW.
-            tracing::debug!(target: "qanal_lib", "RegisterClassExW returned 0 (already exists?)");
+            tracing::debug!(target: "tenvy_lib", "RegisterClassExW returned 0 (already exists?)");
         }
     }
     CLASS_REGISTERED.store(true, Ordering::Release);
@@ -191,7 +191,7 @@ pub fn set_geometry(child: isize, x: i32, y: i32, w: i32, h: i32) -> Result<()> 
     Ok(())
 }
 
-/// Window proc for the QanalMpvHost child.
+/// Window proc for the TenvyMpvHost child.
 ///
 /// mpv is a separate process that only uses our HWND as a DXGI swap-chain
 /// target — it never pumps messages here. That means every WM_* for this
@@ -203,7 +203,7 @@ pub fn set_geometry(child: isize, x: i32, y: i32, w: i32, h: i32) -> Result<()> 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_LBUTTONDBLCLK {
         let sent = EVENT_TX.get().map(|tx| tx.send(HwndEvent::DoubleClick).is_ok()).unwrap_or(false);
-        tracing::info!(target: "qanal_lib", "wnd_proc: WM_LBUTTONDBLCLK sent={}", sent);
+        tracing::info!(target: "tenvy_lib", "wnd_proc: WM_LBUTTONDBLCLK sent={}", sent);
         return LRESULT(0);
     }
     unsafe { DefWindowProcW(hwnd, msg, wp, lp) }

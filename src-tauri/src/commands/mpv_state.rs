@@ -302,7 +302,7 @@ async fn ensure_mpv(app: &AppHandle, holder: &MpvHolder) -> Result<crate::mpv::M
         if mpv.is_alive() {
             return Ok(mpv.clone());
         }
-        tracing::warn!(target: "qanal_lib", "mpv is not running; respawning");
+        tracing::warn!(target: "tenvy_lib", "mpv is not running; respawning");
     }
 
     // Create the window once and record it before spawning, so a failed
@@ -342,7 +342,7 @@ async fn ensure_mpv(app: &AppHandle, holder: &MpvHolder) -> Result<crate::mpv::M
             .and_then(|h| h.mpv.as_ref())
             .map(|m| m.same_instance(&this));
         if current == Some(true) {
-            tracing::error!(target: "qanal_lib", "mpv exited unexpectedly");
+            tracing::error!(target: "tenvy_lib", "mpv exited unexpectedly");
             let _ = app_for_events.emit("mpv://event", &serde_json::json!({ "kind": "crashed" }));
         }
     });
@@ -401,6 +401,6 @@ async fn create_child_window(app: &AppHandle) -> Result<isize> {
         }
     });
 
-    tracing::info!(target: "qanal_lib", "mpv child window: child_hwnd={} parent_hwnd={}", child, parent);
+    tracing::info!(target: "tenvy_lib", "mpv child window: child_hwnd={} parent_hwnd={}", child, parent);
     Ok(child)
 }
