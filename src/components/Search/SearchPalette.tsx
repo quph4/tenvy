@@ -81,7 +81,9 @@ export function SearchPalette() {
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
+      // Stop here, or the global Escape would also leave the guide behind.
       e.preventDefault()
+      e.stopPropagation()
       closeSearch()
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()

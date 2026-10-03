@@ -110,10 +110,18 @@ export function useKeyboardShortcuts() {
           pb.play(prev)
           break
         }
-        case 'g':
+        case 'g': {
           e.preventDefault()
-          ui.setView(ui.view === 'epg' ? 'player' : 'epg')
+          if (ui.view === 'epg') {
+            ui.setView('player')
+            break
+          }
+          // The guide shows live channels; jump there from the library.
+          const pl = usePlaylist.getState()
+          if (pl.activeKind !== 'live') pl.setActiveKind('live').catch(() => {})
+          ui.setView('epg')
           break
+        }
         case ' ':
           if (!channel) return
           e.preventDefault()

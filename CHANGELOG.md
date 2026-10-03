@@ -43,6 +43,9 @@
 - mpv is bundled; no separate install needed.
 
 ### Fixed
+- Escape on a programme card or in search no longer also closes the guide.
+- Switching to Movies or Shows from the guide opens the library; Live and
+  Guide (and G) always return to live TV.
 - Refreshing a playlist no longer wipes favorites and watch history.
 - Streams no longer pause themselves while loading.
 - Search, settings and dialogs are no longer hidden behind the video.

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Channel, ChannelKind, Group, Source } from '../types'
 import { ipc } from '../lib/ipc'
 import { useHistory } from './history'
+import { useUI } from './ui'
 import { showFromContainer, type LibraryItem } from '../lib/series'
 
 interface PlaylistState {
@@ -67,6 +68,8 @@ export const usePlaylist = create<PlaylistState>((set, get) => ({
   async setActiveKind(kind) {
     if (get().activeKind === kind) return
     set({ activeKind: kind, activeGroup: null, selected: null })
+    // The guide is for live TV; films and series open in the library.
+    if (kind !== 'live' && useUI.getState().view === 'epg') useUI.getState().setView('player')
     const { activeSourceId } = get()
     const groups = await ipc.listGroups(activeSourceId, kind)
     set({ groups })

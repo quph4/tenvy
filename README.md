@@ -36,6 +36,20 @@ series|details|show|live` jumps to a screen; for crisp 2x captures:
 chrome --headless=new --hide-scrollbars --force-device-scale-factor=2 --window-size=1440,900 --virtual-time-budget=6000 --screenshot=guide.png "http://localhost:1420/?demo&scene=guide"
 ```
 
+### Demo video
+
+`scripts/demo-video` records a ~40 s walkthrough of the demo mode (cursor,
+captions, title and end cards) with headless Chrome and encodes it with the
+bundled mpv. With `pnpm dev` running:
+
+```
+node scripts/demo-video/record.mjs
+python scripts/demo-video/build.py --encode
+```
+
+The storyboard is at the bottom of `record.mjs`; output lands in
+`scripts/demo-video/out/`.
+
 ## Test
 
 ```

@@ -374,10 +374,13 @@ export function installDemo() {
   mockWindows('main')
   mockIPC((cmd, payload) => handle(cmd, payload as Args), { shouldMockEvents: true })
   document.title = 'Tenvy (demo)'
-  // Headless screenshots don't always advance CSS transitions.
-  const style = document.createElement('style')
-  style.textContent = '*, *::before, *::after { transition: none !important; }'
-  document.head.appendChild(style)
+  // Headless screenshots don't always advance CSS transitions; screen
+  // recordings (no scene) keep them.
+  if (new URLSearchParams(location.search).has('scene')) {
+    const style = document.createElement('style')
+    style.textContent = '*, *::before, *::after { transition: none !important; }'
+    document.head.appendChild(style)
+  }
 }
 
 /**

@@ -7,8 +7,14 @@ import { useUpdater } from '../stores/updater'
 
 export function Topbar() {
   const { openSearch, toggleSettings, setView, view } = useUI()
-  const { sources, activeSourceId, setActiveSource } = usePlaylist()
+  const { sources, activeSourceId, setActiveSource, activeKind, setActiveKind } = usePlaylist()
   const activeSource = sources.find((s) => s.id === activeSourceId)
+  // Live and Guide are both live TV: from the library they switch back.
+  const show = (v: 'player' | 'epg') => {
+    if (activeKind !== 'live') setActiveKind('live').catch(() => {})
+    setView(v)
+  }
+  const liveOn = activeKind === 'live' && view === 'player'
 
   return (
     <header className="flex h-12 items-center gap-3 border-b border-neutral-800/70 bg-neutral-950/80 px-4 backdrop-blur-md">
@@ -32,16 +38,16 @@ export function Topbar() {
         <UpdatePill />
         <div className="flex h-8 overflow-hidden rounded-md border border-neutral-800 bg-neutral-900/80 text-xs">
           <button
-            onClick={() => setView('player')}
+            onClick={() => show('player')}
             className={cn(
               'px-3 font-medium transition-colors',
-              view === 'player' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300',
+              liveOn ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300',
             )}
           >
             Live
           </button>
           <button
-            onClick={() => setView('epg')}
+            onClick={() => show('epg')}
             className={cn(
               'px-3 font-medium transition-colors',
               view === 'epg' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300',

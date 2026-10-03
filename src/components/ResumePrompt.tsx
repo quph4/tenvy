@@ -19,17 +19,21 @@ export function ResumePrompt() {
 
   useEffect(() => {
     if (!pending) return
+    // Capture phase, and stop there, so the global shortcuts (Escape
+    // leaving fullscreen, Enter acting on a notice) don't also fire.
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault()
+        e.stopImmediatePropagation()
         cancel()
       } else if (e.key === 'Enter') {
         e.preventDefault()
+        e.stopImmediatePropagation()
         resolve(false)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [pending, resolve, cancel])
 
   if (!pending) return null
