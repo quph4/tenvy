@@ -9,7 +9,14 @@ import type { Channel } from '../../types'
 export function SearchPalette() {
   const { searchOpen, closeSearch } = useUI()
   const { channels } = usePlaylist()
-  const { requestPlay: play } = usePlayback()
+  const requestPlay = usePlayback((s) => s.requestPlay)
+  const setView = useUI((s) => s.setView)
+  // The Player only exists in the player view, so picking something here
+  // has to switch back to it — otherwise playback starts out of sight.
+  const play = (ch: Channel) => {
+    requestPlay(ch)
+    setView('player')
+  }
   const [q, setQ] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 

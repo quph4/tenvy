@@ -4,8 +4,9 @@ import { usePlaylist } from '../../stores/playlist'
 import { usePlayback } from '../../stores/playback'
 import { ipc } from '../../lib/ipc'
 import { floorToMinutes, hhmm, HOUR, weekday } from '../../lib/time'
-import type { Programme } from '../../types'
+import type { Channel, Programme } from '../../types'
 import { cn } from '../../lib/cn'
+import { useUI } from '../../stores/ui'
 
 const ROW_HEIGHT = 56
 const CHANNEL_COL_WIDTH = 220
@@ -15,7 +16,14 @@ const HISTORY_HOURS = 2
 
 export function EPGGrid() {
   const { channels } = usePlaylist()
-  const { requestPlay: play } = usePlayback()
+  const requestPlay = usePlayback((s) => s.requestPlay)
+  const setView = useUI((s) => s.setView)
+  // The Player only exists in the player view, so picking something here
+  // has to switch back to it — otherwise playback starts out of sight.
+  const play = (ch: Channel) => {
+    requestPlay(ch)
+    setView('player')
+  }
 
   const nowEpoch = Math.floor(Date.now() / 1000)
   const windowStart = useMemo(() => floorToMinutes(nowEpoch - HISTORY_HOURS * HOUR, 30), [nowEpoch])

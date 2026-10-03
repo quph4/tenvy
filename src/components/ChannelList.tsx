@@ -23,7 +23,8 @@ type SortMode = 'added' | 'name'
 
 export function ChannelList() {
   const { channels, loadingChannels, activeGroup, activeKind } = usePlaylist()
-  const { channel: current, requestPlay } = usePlayback()
+  const current = usePlayback((s) => s.channel)
+  const requestPlay = usePlayback((s) => s.requestPlay)
   const isHistory = activeGroup === HISTORY_GROUP
   const play = requestPlay
   const [openShowKey, setOpenShowKey] = useState<string | null>(null)

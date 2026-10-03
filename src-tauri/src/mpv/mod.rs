@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -39,6 +39,9 @@ use crate::err;
 use crate::error::Result;
 
 pub mod hwnd;
+
+/// Minimum spacing between state emits caused purely by `time-pos`.
+const TIME_POS_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 
 /// State the frontend cares about. Emitted as a Tauri event whenever any
 /// observed property changes. Values are Option because mpv reports
@@ -341,6 +344,7 @@ async fn pipe_task(
 
     // pending request_id → reply sender
     let mut pending: HashMap<u64, oneshot::Sender<Value>> = HashMap::new();
+    let mut last_time_emit = Instant::now() - TIME_POS_EMIT_INTERVAL;
 
     loop {
         tokio::select! {
@@ -383,6 +387,17 @@ async fn pipe_task(
                             let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("");
                             let data = val.get("data").cloned().unwrap_or(Value::Null);
                             apply_property(&mut s, name, &data);
+                            // mpv reports time-pos on every frame. Each emit
+                            // serialises the whole snapshot across IPC and
+                            // re-renders the controls, so throttle position-
+                            // only updates. Any other change still emits at
+                            // once and carries the latest position with it.
+                            if name == "time-pos" {
+                                if last_time_emit.elapsed() < TIME_POS_EMIT_INTERVAL {
+                                    continue;
+                                }
+                                last_time_emit = Instant::now();
+                            }
                         }
                         "start-file" => {
                             s.playing = true;

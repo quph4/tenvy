@@ -8,7 +8,8 @@ import { ipc, onMpvEvent, onMpvState } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
 import { hhmm } from '../../lib/time'
 import { END_GUARD, useHistory } from '../../stores/history'
-import { getCurrentWindow } from '@tauri-apps/api/window'
+import { useShallow } from 'zustand/react/shallow'
+import { useVideoObscured } from '../../hooks/useVideoObscured'
 
 const DRAWER_WIDTH = 288 // px — tailwind w-72
 
@@ -28,6 +29,8 @@ const DRAWER_WIDTH = 288 // px — tailwind w-72
  * is a docked strip below the video rather than an overlay on top of it.
  */
 export function Player() {
+  // Explicit selection (not the whole store) so timePos ticks don't
+  // re-render the shell — only Controls needs those.
   const {
     channel,
     volume,
@@ -39,8 +42,22 @@ export function Player() {
     subtitleTracks,
     currentAudio,
     currentSubtitle,
-  } = usePlayback()
-  const { push } = useToast()
+  } = usePlayback(
+    useShallow((s) => ({
+      channel: s.channel,
+      volume: s.volume,
+      muted: s.muted,
+      playing: s.playing,
+      fullscreen: s.fullscreen,
+      setFullscreen: s.setFullscreen,
+      audioTracks: s.audioTracks,
+      subtitleTracks: s.subtitleTracks,
+      currentAudio: s.currentAudio,
+      currentSubtitle: s.currentSubtitle,
+    })),
+  )
+  const push = useToast((s) => s.push)
+  const obscured = useVideoObscured()
   const shellRef = useRef<HTMLDivElement>(null)
   const videoBoxRef = useRef<HTMLDivElement>(null)
   const [initError, setInitError] = useState<string | null>(null)
@@ -126,6 +143,12 @@ export function Player() {
   useLayoutEffect(() => {
     const el = videoBoxRef.current
     if (!el) return
+    if (obscured) {
+      // An overlay is open — park the native window so the overlay is
+      // actually visible. Zero size makes Rust SW_HIDE the HWND.
+      ipc.mpvSetGeometry(0, 0, 0, 0).catch(() => {})
+      return
+    }
 
     const push = () => {
       const r = el.getBoundingClientRect()
@@ -151,17 +174,34 @@ export function Player() {
       window.removeEventListener('resize', push)
       window.removeEventListener('scroll', push, true)
     }
-    // Rerun when channel changes (empty state ↔ video box) or fullscreen
-    // toggles (siblings unmount/remount and the box jumps).
-  }, [channel?.id, fullscreen])
+    // Rerun when channel changes (empty state ↔ video box), fullscreen
+    // toggles (siblings unmount/remount and the box jumps), or an overlay
+    // opens/closes.
+  }, [channel?.id, fullscreen, obscured])
 
-  // 5) VOD resume: save the last known position periodically + on unload.
-  //    mpv reports timePos through the state event; we pull it from the
-  //    store at save-time so we always have the freshest value.
+  // The Player unmounts when the user switches to the Guide view. Without
+  // this the native window would stay parked at its last rect, floating
+  // over the guide and swallowing its clicks.
+  useEffect(() => {
+    return () => {
+      ipc.mpvSetGeometry(0, 0, 0, 0).catch(() => {})
+    }
+  }, [])
+
+  // 5) VOD resume: save the last known position periodically + on channel
+  //    switch. We track the last non-null position ourselves because by the
+  //    time the cleanup runs, `play()` has already reset the store's
+  //    timePos/duration for the next channel.
   useEffect(() => {
     if (!isVod || channelId === undefined) return
+    const last = { timePos: null as number | null, duration: null as number | null }
+    const unsubscribe = usePlayback.subscribe((s) => {
+      if (s.channel?.id !== channelId) return
+      if (s.timePos != null) last.timePos = s.timePos
+      if (s.duration != null && s.duration > 0) last.duration = s.duration
+    })
     const save = () => {
-      const { timePos, duration } = usePlayback.getState()
+      const { timePos, duration } = last
       if (timePos == null || duration == null || duration <= 0) return
       // Near the end? Flag the row as finished but keep the entry so the
       // History view can show "Watched" badges. The sticky `finished` bit
@@ -179,54 +219,26 @@ export function Player() {
     const interval = window.setInterval(save, 5000)
     return () => {
       window.clearInterval(interval)
+      unsubscribe()
       save() // final save on channel switch / unmount
     }
   }, [isVod, channelId])
 
-  const toggleFullscreen = async () => {
-    // WebView2 rejects HTMLElement.requestFullscreen() when it's called from
-    // an async Tauri event listener because there's no user-activation on the
-    // JS call stack — the double-click originated in the native mpv HWND and
-    // went round-trip through Rust, so the browser sees no gesture. Use the
-    // Tauri window API instead (HWND-level, no gesture required) and hide
-    // the HTML chrome via the `fullscreen` store flag so only the video
-    // rect remains visible. ResizeObserver on videoBoxRef pushes the new
-    // geometry to the mpv HWND so the native child fills the window.
-    const next = !usePlayback.getState().fullscreen
-    setFullscreen(next)
-    try {
-      await getCurrentWindow().setFullscreen(next)
-    } catch {
-      /* non-fatal — the store flag alone still produces cinema mode */
-    }
-  }
+  // The store's setFullscreen drives the Tauri window; ResizeObserver on
+  // videoBoxRef then pushes the new geometry so the native child fills it.
+  const toggleFullscreen = () => setFullscreen(!usePlayback.getState().fullscreen)
 
-  // Escape exits fullscreen. We can't rely on the browser's own handler
-  // because we're not using the HTML Fullscreen API anymore.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && usePlayback.getState().fullscreen) {
-        setFullscreen(false)
-        getCurrentWindow().setFullscreen(false).catch(() => {})
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [setFullscreen])
-
-  // Double-click on the video rect routes through mpv → Rust → this event.
-  // The native mpv HWND swallows pointer events before WebView2 can see
-  // them, so an HTML `onDoubleClick` on the video div never fires. We bind
-  // MBTN_LEFT_DBL in mpv's input.conf to script-message a tag we forward
-  // back here as `mpv://event`. Keep a ref so the async listener always
-  // calls the current closure without re-subscribing on every render.
-  const toggleFullscreenRef = useRef(toggleFullscreen)
-  toggleFullscreenRef.current = toggleFullscreen
+  // Double-click on the video rect routes through the native HWND → Rust →
+  // this event. The HWND swallows pointer events before WebView2 can see
+  // them, so an HTML `onDoubleClick` on the video div never fires; instead
+  // the child window's wnd_proc catches WM_LBUTTONDBLCLK and Rust emits
+  // `mpv://event`.
   useEffect(() => {
     let unlisten: (() => void) | null = null
     onMpvEvent((ev) => {
       if (ev.kind === 'double-click') {
-        toggleFullscreenRef.current().catch(() => {})
+        const { fullscreen, setFullscreen } = usePlayback.getState()
+        setFullscreen(!fullscreen)
       }
     })
       .then((fn) => {
@@ -362,7 +374,7 @@ function PlayerEmpty({ error }: { error: string | null }) {
 }
 
 function NowNext() {
-  const { channel } = usePlayback()
+  const channel = usePlayback((s) => s.channel)
   const [now, setNow] = useState<Programme | null>(null)
   const [next, setNext] = useState<Programme | null>(null)
 

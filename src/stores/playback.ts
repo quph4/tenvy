@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Channel, MpvState, MpvTrack } from '../types'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { isResumable, useHistory } from './history'
 
 /**
@@ -159,7 +160,19 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
     }),
   setVolume: (v) => set({ volume: Math.max(0, Math.min(1, v)) }),
   toggleMute: () => set((s) => ({ muted: !s.muted })),
-  setFullscreen: (on) => set({ fullscreen: on }),
+  setFullscreen: (on) => {
+    if (get().fullscreen === on) return
+    set({ fullscreen: on })
+    // HTML requestFullscreen() needs a user gesture on the JS stack, which
+    // double-clicks relayed from the native mpv HWND don't have. The Tauri
+    // window API works at the HWND level with no gesture required; the
+    // store flag hides the HTML chrome so only the video rect remains.
+    getCurrentWindow()
+      .setFullscreen(on)
+      .catch(() => {
+        /* non-fatal — the store flag alone still produces cinema mode */
+      })
+  },
   setPlaying: (on) => set({ playing: on }),
   setPreferredAudioTrack: (idx) => set({ preferredAudioTrack: idx }),
   setPreferredSubtitleTrack: (idx) => set({ preferredSubtitleTrack: idx }),

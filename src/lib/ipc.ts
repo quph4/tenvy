@@ -179,7 +179,7 @@ export async function onMpvState(handler: (s: MpvState) => void): Promise<Unlist
 }
 
 /**
- * Out-of-band mpv events (double-click relayed from input.conf, etc.).
+ * Out-of-band mpv events (double-click caught by the native HWND, etc.).
  * These don't flow through the state snapshot channel because they're
  * one-shot signals — the native mpv HWND captures pointer events before
  * WebView2 sees them, so we get them back through this side channel.
