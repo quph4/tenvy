@@ -160,6 +160,7 @@ const ctx = {
   },
 }
 
+const TEST_TIMEOUT_MS = 180_000
 const results = []
 for (const [i, test] of tests.entries()) {
   // The first test connects the provider; the rest build on it.
@@ -167,17 +168,28 @@ for (const [i, test] of tests.entries()) {
   const t0 = Date.now()
   let ok = true
   let note = ''
+  let timer
   try {
-    await page.run(async (t) => t.reset())
-    note = (await test.run(ctx)) ?? ''
-    // Whatever the test did, the app must still agree with itself.
-    const problems = await page.run(async (t) => t.consistency())
-    if (problems.length) throw new Error(`inconsistent afterwards: ${problems.join('; ')}`)
+    // A stuck test fails instead of hanging the whole run.
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`timed out after ${TEST_TIMEOUT_MS / 1000}s`)), TEST_TIMEOUT_MS)
+    })
+    await Promise.race([
+      (async () => {
+        await page.run(async (t) => t.reset())
+        note = (await test.run(ctx)) ?? ''
+        // Whatever the test did, the app must still agree with itself.
+        const problems = await page.run(async (t) => t.consistency())
+        if (problems.length) throw new Error(`inconsistent afterwards: ${problems.join('; ')}`)
+      })(),
+      timeout,
+    ])
   } catch (e) {
     ok = false
     note = String(e.message ?? e)
     await page.screenshot(join(OUT, `fail-${results.length + 1}.png`)).catch(() => {})
   }
+  clearTimeout(timer)
   const secs = ((Date.now() - t0) / 1000).toFixed(1)
   results.push({ name: test.name, ok, secs, note })
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${test.name}  (${secs}s)${note ? `  — ${note}` : ''}`)

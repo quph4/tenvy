@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 — 2026-10-04
 
 ### Added
 - New versions are offered in a dialog with what's new: "Update now" or
