@@ -1,6 +1,8 @@
 import { useUI } from '../stores/ui'
 import { usePlayback } from '../stores/playback'
 import { useIngest } from '../stores/ingest'
+import { useParental } from '../stores/parental'
+import { useUpdater } from '../stores/updater'
 
 /**
  * True while any full-window overlay is open.
@@ -14,8 +16,10 @@ import { useIngest } from '../stores/ingest'
  * Add new overlays here — this is the single list the Player consults.
  */
 export function useVideoObscured(): boolean {
-  const ui = useUI((s) => s.searchOpen || s.settingsOpen || s.addSourceOpen)
+  const ui = useUI((s) => s.searchOpen || s.settingsOpen || s.addSourceOpen || s.manageCategoriesOpen)
   const resume = usePlayback((s) => s.pendingResume !== null)
   const ingest = useIngest((s) => s.status !== null)
-  return ui || resume || ingest
+  const pin = useParental((s) => s.prompt !== null)
+  const update = useUpdater((s) => s.prompt && (s.status.kind === 'available' || s.status.kind === 'downloading'))
+  return ui || resume || ingest || pin || update
 }

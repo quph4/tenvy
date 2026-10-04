@@ -13,6 +13,8 @@ import { FirstRun } from './components/FirstRun'
 import { Home } from './components/Home/Home'
 import { PinPrompt } from './components/PinPrompt'
 import { ChannelMenu } from './components/ChannelMenu'
+import { UpdatePrompt } from './components/UpdatePrompt'
+import { useUpdater } from './stores/updater'
 import { ManageCategories } from './components/Settings/ManageCategories'
 import { useAccounts } from './stores/accounts'
 import { useParental } from './stores/parental'
@@ -33,6 +35,7 @@ import { startToastMirror } from './lib/osd'
 import { startAutoRefresh } from './stores/autoRefresh'
 import { lastChannelId, useTvPrefs } from './stores/tvPrefs'
 import { Heart } from 'lucide-react'
+import { cn } from './lib/cn'
 
 function App() {
   const { sources, hydrate, activeKind } = usePlaylist()
@@ -177,9 +180,13 @@ function App() {
             {support.label ?? 'Support Tenvy'}
           </button>
         )}
-        <span className={support ? 'tabular-nums text-neutral-600' : 'ml-auto tabular-nums text-neutral-600'}>
+        <button
+          onClick={() => useUpdater.getState().checkForUpdates(true)}
+          title="Check for updates"
+          className={cn('tabular-nums text-neutral-600 hover:text-neutral-300', !support && 'ml-auto')}
+        >
           Tenvy · {__APP_VERSION__}
-        </span>
+        </button>
       </footer>}
 
       <SearchPalette />
@@ -188,6 +195,7 @@ function App() {
       <ManageCategories />
       <PinPrompt />
       <ChannelMenu />
+      <UpdatePrompt />
       <Toasts />
       <IngestOverlay />
       <ResumePrompt />

@@ -427,6 +427,24 @@ function handle(cmd: string, a: Args = {}): unknown {
         eofReached: false,
         buffering: false,
       }
+    case 'plugin:updater|check':
+      // scene=update: pretend a newer version is out.
+      if (new URLSearchParams(location.search).get('scene') !== 'update') return null
+      return {
+        rid: 1,
+        currentVersion: '0.1.1',
+        version: '0.1.2',
+        date: null,
+        body: [
+          '### Added',
+          '- Recording of the channel you are watching',
+          '- A TV mode for PCs connected to a TV',
+          '',
+          '### Fixed',
+          '- The guide remembers the day you were looking at',
+        ].join('\n'),
+        rawJson: {},
+      }
     case 'plugin:notification|is_permission_granted':
       return true
     default:
@@ -450,7 +468,7 @@ export function installDemo() {
 
 /**
  * Jump straight to a screen, for scripted screenshots:
- * `?demo&scene=welcome|home|guide|movies|series|details|show|live|categories`.
+ * `?demo&scene=welcome|home|guide|movies|series|details|show|live|categories|update`.
  */
 export async function applyScene() {
   const scene = new URLSearchParams(location.search).get('scene')
@@ -466,6 +484,7 @@ export async function applyScene() {
   if (scene === 'series') await pl.setActiveKind('series')
   if (scene === 'details') await pl.openDetails(byId.get(102)!)
   if (scene === 'categories') useUI.getState().setManageCategories(true)
+  if (scene === 'update') (await import('../stores/updater')).useUpdater.getState().checkForUpdates(false)
   if (scene === 'show') {
     await pl.setActiveKind('series')
     await pl.openDetails(byId.get(300)!)

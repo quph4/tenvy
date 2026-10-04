@@ -101,11 +101,11 @@ export function Topbar() {
 /** Shown only while an update is available or downloading. */
 function UpdatePill() {
   const status = useUpdater((s) => s.status)
-  const install = useUpdater((s) => s.install)
+  const showPrompt = useUpdater((s) => s.showPrompt)
   if (status.kind === 'available') {
     return (
       <button
-        onClick={() => install()}
+        onClick={() => showPrompt()}
         title={status.notes ?? undefined}
         className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-accent-400 px-3 text-xs font-semibold text-neutral-950 hover:bg-accent-300"
       >

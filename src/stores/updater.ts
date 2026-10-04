@@ -8,6 +8,9 @@ import { relaunch } from '@tauri-apps/plugin-process'
  *
  * Checks quietly at startup and every few hours; a failed check (offline,
  * release host not configured yet) is silent unless the user asked.
+ * A new version is offered in a dialog (UpdatePrompt) — never installed
+ * without the user saying so. "Later" asks again the next day; the
+ * Update button in the top bar stays meanwhile.
  */
 export type UpdateStatus =
   | { kind: 'idle' }
@@ -19,15 +22,49 @@ export type UpdateStatus =
 
 interface UpdaterState {
   status: UpdateStatus
+  /** The "a new version is available" dialog is wanted. */
+  prompt: boolean
   /** `manual` surfaces "up to date" / errors; background checks don't. */
   checkForUpdates(manual?: boolean): Promise<void>
   install(): Promise<void>
+  /** "Later": close the dialog; ask again tomorrow. */
+  later(): void
+  /** Open the dialog for the pending update (the top-bar button). */
+  showPrompt(): void
+}
+
+const PROMPTED_KEY = 'tenvy.updatePrompted'
+const ASK_AGAIN_MS = 24 * 60 * 60 * 1000
+
+/** Whether a background check may open the dialog for this version. */
+function mayPrompt(version: string): boolean {
+  try {
+    const last = JSON.parse(localStorage.getItem(PROMPTED_KEY) ?? 'null') as { version: string; at: number } | null
+    return !last || last.version !== version || Date.now() - last.at > ASK_AGAIN_MS
+  } catch {
+    return true
+  }
 }
 
 let pending: Update | null = null
 
 export const useUpdater = create<UpdaterState>((set, get) => ({
   status: { kind: 'idle' },
+  prompt: false,
+  later() {
+    const s = get().status
+    if (s.kind === 'available') {
+      try {
+        localStorage.setItem(PROMPTED_KEY, JSON.stringify({ version: s.version, at: Date.now() }))
+      } catch {
+        /* ignore */
+      }
+    }
+    set({ prompt: false })
+  },
+  showPrompt() {
+    set({ prompt: true })
+  },
 
   async checkForUpdates(manual = false) {
     const s = get().status.kind
@@ -37,7 +74,10 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
       const update = await check()
       if (update) {
         pending = update
-        set({ status: { kind: 'available', version: update.version, notes: update.body ?? null } })
+        set({
+          status: { kind: 'available', version: update.version, notes: update.body ?? null },
+          prompt: manual || mayPrompt(update.version),
+        })
       } else if (manual || get().status.kind === 'checking') {
         set({ status: { kind: 'none' } })
       }

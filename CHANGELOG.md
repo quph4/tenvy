@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- New versions are offered in a dialog with what's new: "Update now" or
+  "Later" (asks again the next day; the Update button in the top bar
+  stays). Never during fullscreen or the mini player.
+- Click the version in the bottom-right corner (or Settings → About) to
+  check for updates yourself.
+
+### Fixed
+- Manage categories and the PIN prompt are no longer partly hidden
+  behind the video while something plays.
+
 ## 0.1.1 — 2026-10-04
 
 ### Added
