@@ -6,7 +6,17 @@ import { useToast } from '../stores/toast'
 import { ipc } from '../lib/ipc'
 import { openInExternalPlayer } from '../lib/externalPlayer'
 import { liveChannels, osd } from '../lib/osd'
+import { isPlayerShown } from '../lib/layout'
+import { useParental } from '../stores/parental'
+import { useUpdater } from '../stores/updater'
+import { useChannelMenu } from '../components/ChannelMenu'
 import { cycleAspect, showStreamInfo } from '../lib/picture'
+
+/** Keys that act on the player; ignored when it isn't on screen. */
+const PLAYBACK_KEYS = new Set([
+  ' ', 'f', 'p', 'm', 'x', 'j', 'l', 'a', 'i', 'backspace',
+  'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'pageup', 'pagedown', 'channelup', 'channeldown',
+])
 
 /** Wait this long after the last digit before switching channel. */
 const DIGIT_WAIT_MS = 1500
@@ -53,7 +63,10 @@ export function useKeyboardShortcuts() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
       const typing =
-        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+        target &&
+        (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) ||
+          target.isContentEditable ||
+          !!target.closest?.('[role="listbox"],[role="menu"]'))
       const ui = useUI.getState()
       const pb = usePlayback.getState()
       const channel = pb.channel
@@ -74,11 +87,26 @@ export function useKeyboardShortcuts() {
       }
 
       if (typing) return
+      // A dialog is open: keys belong to it, not to the player behind it.
+      if (
+        ui.searchOpen ||
+        ui.settingsOpen ||
+        ui.addSourceOpen ||
+        ui.manageCategoriesOpen ||
+        pb.pendingResume ||
+        useParental.getState().prompt ||
+        useChannelMenu.getState().open ||
+        useUpdater.getState().prompt
+      )
+        return
+      // Playback keys need the player on screen (fullscreen/mini count).
+      const onScreen = isPlayerShown()
+      if (PLAYBACK_KEYS.has(e.key.toLowerCase()) && !onScreen) return
 
       // Channel numbers: live TV in the player view (or fullscreen).
       if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey) {
         const live = usePlaylist.getState().activeKind === 'live' || channel?.kind === 'live'
-        if (!live || ui.view !== 'player') return
+        if (!live || ui.view !== 'player' || !onScreen) return
         if (!digits && e.key === '0') return
         e.preventDefault()
         digits = (digits + e.key).slice(0, 4)

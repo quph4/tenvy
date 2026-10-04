@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { ipc } from '../lib/ipc'
 import { osd } from '../lib/osd'
 import { usePlayback } from './playback'
 import { useToast } from './toast'
@@ -28,21 +27,35 @@ function arm(endsAt: number | null) {
   timer = window.setTimeout(() => {
     useSleep.setState({ endsAt: null })
     usePlayback.getState().stop()
-    ipc.mpvStop().catch(() => {})
     useToast.getState().push('info', 'Sleep timer: playback stopped.')
   }, Math.max(0, ms))
 }
+
+// The timer belongs to what was playing when it was set: switching to
+// something else (or stopping) cancels it.
+let boundTo: number | null = null
+usePlayback.subscribe((s, prev) => {
+  if (boundTo == null) return
+  if (s.channel?.id !== prev.channel?.id && s.channel?.id !== boundTo) {
+    boundTo = null
+    window.clearTimeout(timer)
+    window.clearTimeout(warnTimer)
+    useSleep.setState({ endsAt: null })
+  }
+})
 
 export const useSleep = create<SleepState>((set) => ({
   endsAt: null,
   set(minutes) {
     const endsAt = minutes == null ? null : Date.now() + minutes * 60_000
+    boundTo = minutes == null ? null : usePlayback.getState().channel?.id ?? null
     set({ endsAt })
     arm(endsAt)
     osd(minutes == null ? 'Sleep timer off' : `Sleep timer: ${minutes} min`, 1500)
   },
   untilEpoch(stop) {
     const endsAt = stop * 1000
+    boundTo = usePlayback.getState().channel?.id ?? null
     set({ endsAt })
     arm(endsAt)
     const d = new Date(endsAt)

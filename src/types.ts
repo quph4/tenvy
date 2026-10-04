@@ -139,6 +139,8 @@ export interface MpvState {
   eofReached: boolean
   /** Waiting for the network to fill the cache. */
   buffering: boolean
+  /** Which load this belongs to (mpv_load's return value). */
+  loadGen: number
 }
 
 /** One row from the watch_history table, joined with its channel. */

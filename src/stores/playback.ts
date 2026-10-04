@@ -27,6 +27,12 @@ interface PlaybackState {
   channel: Channel | null
   /** The live channel watched before this one (Backspace goes back). */
   previous: Channel | null
+  /** mpv couldn't start (missing or broken install). */
+  initError: string | null
+  /** Generation of the current load; -1 while one is on its way. mpv
+   *  snapshots from other loads (the stream just left) are ignored for
+   *  position, duration and tracks. */
+  loadGen: number | null
   /** 0..1 in UI units; mpv's 0..100 conversion happens in `ipc.ts`. */
   volume: number
   muted: boolean
@@ -105,6 +111,8 @@ interface PlaybackState {
 export const usePlayback = create<PlaybackState>((set, get) => ({
   channel: null,
   previous: null,
+  initError: null,
+  loadGen: null,
   volume: 0.8,
   muted: false,
   fullscreen: false,
@@ -144,6 +152,7 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
     if (pl.activeKind !== ch.kind && !ownList) pl.setActiveKind(ch.kind).catch(() => {})
     set((s) => ({
       playNonce: s.playNonce + 1,
+      loadGen: -1,
       catchup: null,
       channel: ch,
       previous: s.channel?.kind === 'live' && s.channel.id !== ch.id ? s.channel : s.previous,
@@ -199,8 +208,14 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   consumePendingStart: () => set({ pendingStart: null }),
   markLoaded: (nonce) => set({ loadedNonce: nonce }),
 
-  stop: () =>
-    set({
+  // Stopping means the player stops too — not just the UI. (The Library
+  // button once only cleared this state and the film played on unseen.)
+  stop: () => {
+    if (get().mini) get().setMini(false)
+    set((s) => ({
+      // A new nonce: anything still opening for the old pick stands down.
+      playNonce: s.playNonce + 1,
+      loadGen: -1,
       catchup: null,
       channel: null,
       playing: false,
@@ -211,7 +226,10 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
       subtitleTracks: [],
       currentAudio: null,
       currentSubtitle: null,
-    }),
+    }))
+    // Always: cheap when idle, and it also cancels a load on its way.
+    ipc.mpvStop().catch(() => {})
+  },
   setVolume: (v) => set({ volume: Math.max(0, Math.min(1, v)) }),
   toggleMute: () => set((s) => ({ muted: !s.muted })),
   setFullscreen: (on) => {
@@ -242,22 +260,29 @@ export const usePlayback = create<PlaybackState>((set, get) => ({
   },
   setPreferredAudioTrack: (idx) => set({ preferredAudioTrack: idx }),
   setPreferredSubtitleTrack: (idx) => set({ preferredSubtitleTrack: idx }),
-  applyMpvState: (s) =>
+  applyMpvState: (s) => {
+    const want = get().loadGen
+    const fresh = want == null || s.loadGen === want
     set({
-      timePos: s.timePos,
-      duration: s.duration,
-      audioTracks: s.audioTracks,
-      subtitleTracks: s.subtitleTracks,
-      currentAudio: s.currentAudio,
-      currentSubtitle: s.currentSubtitle,
+      ...(fresh
+        ? {
+            timePos: s.timePos,
+            duration: s.duration,
+            audioTracks: s.audioTracks,
+            subtitleTracks: s.subtitleTracks,
+            currentAudio: s.currentAudio,
+            currentSubtitle: s.currentSubtitle,
+            eofReached: s.eofReached,
+            buffering: s.buffering,
+          }
+        : {}),
       errorSeq: s.errorSeq,
       lastError: s.lastError,
-      eofReached: s.eofReached,
-      buffering: s.buffering,
       // Reflect mpv's real pause flag so the button stays honest. Only the
       // flag — mpv is briefly `idle` while a new file loads, and treating
       // that as "not playing" used to flip the UI (and mpv) to paused. We
       // do *not* mirror volume or muted — those are pure UI intent.
       playing: !s.paused,
-    }),
+    })
+  },
 }))

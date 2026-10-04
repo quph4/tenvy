@@ -287,27 +287,138 @@ export const tests = [
       }),
   },
   {
-    name: 'Going to Movies stops live TV (no sound behind the library)',
+    name: 'Leaving the player: Now playing bar everywhere; its Stop really stops',
     run: async (ctx) => {
       await ctx.page(async (t) => {
         const pl = await t.pl()
+        const ui = (await t.ui()).getState()
         await pl.getState().setActiveKind('live')
-        ;(await t.ui()).getState().setView('player')
+        await pl.getState().setActiveGroup(null)
+        ui.setView('player')
         ;(await t.pb()).getState().play(await t.live('Test News 24'))
         await t.playing('Test News 24')
+        const bar = () => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('Back to player'))
+        // Movies tab, Home and the guide all show what's playing.
         ;[...document.querySelectorAll('aside .grid button')].find((b) => b.textContent.trim().toLowerCase() === 'movies').click()
-        const pb = await t.pb()
-        await t.until(() => !pb.getState().channel, 'live stopped')
+        await t.until(bar, 'bar in the library')
+        ui.setView('home')
+        await t.until(bar, 'bar on Home')
+        ui.setView('epg')
+        await t.until(bar, 'bar in the guide')
+        // Back to player brings it back on screen.
+        t.clickText('Back to player')
+        await t.until(async () => (await t.ui()).getState().view === 'player' && (await t.pl()).getState().activeKind === 'live', 'player on screen')
+        if (bar()) throw new Error('bar still shown with the player on screen')
+        ui.setView('home')
+        await t.until(bar, 'bar on Home again')
+        t.clickText('Stop')
+        await t.until(async () => !(await t.pb()).getState().channel, 'stopped')
       })
-      // The connection closes a moment after the stop.
       let s
       for (let i = 0; i < 10; i++) {
         s = await ctx.control('')
         if (s.openStreams === 0) break
         await new Promise((r) => setTimeout(r, 500))
       }
-      if (s.openStreams !== 0) throw new Error(`${s.openStreams} stream(s) still open at the provider after 5 s`)
+      if (s.openStreams !== 0) throw new Error(`${s.openStreams} stream(s) still open after Stop`)
     },
+  },
+  {
+    name: 'The player’s Library button stops the film for real',
+    run: async (ctx) => {
+      await ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('movie')
+        ;(await t.ui()).getState().setView('player')
+        await t.until(() => pl.getState().channels.length, 'movies')
+        ;(await t.pb()).getState().requestPlay(pl.getState().channels.find((c) => c.name.startsWith('Color Bars')))
+        await t.playing('Color Bars Forever (2024)')
+        document.querySelector('button[title="Stop and go back to the library"]').click()
+        await t.until(async () => !(await t.pb()).getState().channel, 'film stopped')
+        await t.until(() => t.text().includes('All movies'), 'library on screen')
+      })
+      let s
+      for (let i = 0; i < 10; i++) {
+        s = await ctx.control('')
+        if (s.openStreams === 0) break
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      if (s.openStreams !== 0) throw new Error(`${s.openStreams} stream(s) still open — the film kept playing`)
+    },
+  },
+  {
+    name: 'Fast zapping then Stop: nothing left playing or open',
+    run: async (ctx) => {
+      await ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        ;(await t.ui()).getState().setView('player')
+        const pb = await t.pb()
+        pb.getState().play(await t.live('Test One HD'))
+        await t.playing('Test One HD')
+        for (const k of ['ArrowDown', 'ArrowDown', 'ArrowDown']) {
+          t.key(k)
+          await t.wait(120)
+        }
+        pb.getState().stop() // while those loads are still on their way
+        await t.wait(4000)
+        if (pb.getState().channel) throw new Error('something is still selected')
+      })
+      let s
+      for (let i = 0; i < 10; i++) {
+        s = await ctx.control('')
+        if (s.openStreams === 0) break
+        await new Promise((r) => setTimeout(r, 500))
+      }
+      if (s.openStreams !== 0) throw new Error(`${s.openStreams} stream(s) open after Stop — a late load won`)
+    },
+  },
+  {
+    name: 'A live channel picked from Movies → Favorites plays (with the bar)',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const ipc = await t.ipc()
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        const ch = await t.live('Test Kids')
+        const favs = await ipc.listFavorites()
+        const added = !favs.some((c) => c.id === ch.id)
+        if (added) await ipc.toggleFavorite(ch.id)
+        await pl.getState().setActiveKind('movie')
+        ;(await t.ui()).getState().setView('player')
+        await pl.getState().setActiveGroup('__favorites')
+        await t.until(() => pl.getState().channels.some((c) => c.name === 'Test Kids'), 'favorite listed')
+        ;(await t.pb()).getState().play(pl.getState().channels.find((c) => c.name === 'Test Kids'))
+        await t.playing('Test Kids')
+        await t.until(() => t.text().includes('Back to player') || !!document.querySelector('button[aria-label="Pause"]'), 'bar or player visible')
+        await t.stop()
+        if (added) await ipc.toggleFavorite(ch.id) // leave favorites as they were
+        await pl.getState().setActiveGroup(null)
+      }),
+  },
+  {
+    name: 'Arrow keys in the guide scroll; they don’t zap a hidden player',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        const ui = (await t.ui()).getState()
+        ui.setView('player')
+        const pb = await t.pb()
+        pb.getState().play(await t.live('Test Two HD'))
+        await t.playing('Test Two HD')
+        ui.setView('epg')
+        await t.wait(500)
+        t.key('ArrowDown')
+        t.key('5')
+        await t.wait(2500)
+        if (pb.getState().channel?.name !== 'Test Two HD') throw new Error(`zapped to ${pb.getState().channel?.name} behind the guide`)
+        await t.stop()
+        ui.setView('player')
+      }),
   },
   {
     name: 'Opening another title while a film plays shows its page',
@@ -378,6 +489,10 @@ export const tests = [
     name: 'Mini player (P) and fullscreen (F / Esc)',
     run: (ctx) =>
       ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        ;(await t.ui()).getState().setView('player')
         const pb = await t.pb()
         pb.getState().play(await t.live('Test One HD'))
         await t.playing('Test One HD')
@@ -510,8 +625,13 @@ export const tests = [
         pb.getState().play(pl.getState().channels.find((c) => c.name === 'M3U Test One HD'))
         await t.playing('M3U Test One HD')
         const now = await t.until(async () => (await ipc.nowPlaying(['test.101'])).length, 'guide for M3U', 30000)
-        await t.stop()
-        await ipc.removeSource(src.id)
+        // Removing the provider of what's playing stops it (via Settings).
+        ;(await t.ui()).getState().toggleSettings()
+        await t.until(() => [...document.querySelectorAll('button[aria-label="Remove"]')].length === 2, 'two providers listed')
+        ;[...document.querySelectorAll('button[aria-label="Remove"]')][1].click()
+        await t.until(async () => (await ipc.listSources()).length === 1, 'provider removed')
+        if ((await t.pb()).getState().channel) throw new Error('still playing the removed provider')
+        ;(await t.ui()).getState().toggleSettings()
         await pl.getState().setActiveSource(pl.getState().sources[0].id)
         await pl.getState().hydrate()
         if ((await ipc.listSources()).length !== 1) throw new Error('second provider not removed')
@@ -544,6 +664,12 @@ export const tests = [
     name: 'Player crash: mpv is restarted and playback resumes',
     run: async (ctx) => {
       await ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        ;(await t.ui()).getState().setView('player')
+        const pb = (await t.pb()).getState()
+        if (pb.channel?.name !== 'Test Sport 1') pb.play(await t.live('Test Sport 1'))
         await t.playing('Test Sport 1', 1)
       })
       await ctx.killMpv()

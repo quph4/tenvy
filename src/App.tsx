@@ -14,6 +14,8 @@ import { Home } from './components/Home/Home'
 import { PinPrompt } from './components/PinPrompt'
 import { ChannelMenu } from './components/ChannelMenu'
 import { UpdatePrompt } from './components/UpdatePrompt'
+import { NowPlayingBar } from './components/NowPlayingBar'
+import { PlaybackHost } from './components/Player/PlaybackHost'
 import { useUpdater } from './stores/updater'
 import { ManageCategories } from './components/Settings/ManageCategories'
 import { useAccounts } from './stores/accounts'
@@ -93,26 +95,20 @@ function App() {
   useEffect(() => startAutoRefresh(), [])
   const support = useAppInfo((s) => s.info?.config.support ?? null)
 
-  // Nothing plays where you can't see it. Going to Movies or Shows from
-  // live TV stops the channel (otherwise its sound carries on behind the
-  // library, holding the provider's connection) — the mini player is the
-  // way to keep it on. And opening another title's page while a film
-  // plays stops the film (its position is saved) so the page shows.
+  // Nothing plays out of sight unannounced: whenever something plays and
+  // the player isn't on screen (Home, the guide, the library), the Now
+  // playing bar shows it, with Back to player, pause and Stop. Opening
+  // another title's page while a film plays stops the film (its position
+  // is saved) — the page is what you asked to see.
+  const playerShown =
+    sources.length > 0 && (mini || (view !== 'home' && view !== 'epg' && !(libraryTab && !watchingVod)))
+  // (Same rule as lib/layout isPlayerShown, which the keyboard uses.)
+  const hasChannel = usePlayback((s) => !!s.channel)
   const selected = usePlaylist((s) => s.selected)
   useEffect(() => {
     const pb = usePlayback.getState()
-    if (activeKind !== 'live' && pb.channel?.kind === 'live' && !pb.mini) {
-      pb.stop()
-      ipc.mpvStop().catch(() => {})
-    }
-  }, [activeKind])
-  useEffect(() => {
-    const pb = usePlayback.getState()
-    if (selected && pb.channel && pb.channel.kind !== 'live' && !pb.mini) {
-      pb.stop()
-      ipc.mpvStop().catch(() => {})
-    }
-  }, [selected])
+    if (selected && pb.channel && pb.channel.kind !== 'live' && !pb.mini) pb.stop()
+  }, [selected, mini])
 
   useKeyboardShortcuts()
 
@@ -145,6 +141,8 @@ function App() {
           </>
         )}
       </main>
+
+      {hasChannel && !playerShown && <NowPlayingBar />}
 
       {!chromeless && <footer className="flex h-7 items-center gap-3 border-t border-neutral-800/70 bg-neutral-950/80 px-4 text-[11px] text-neutral-500">
         <span>
@@ -196,6 +194,7 @@ function App() {
       <PinPrompt />
       <ChannelMenu />
       <UpdatePrompt />
+      <PlaybackHost />
       <Toasts />
       <IngestOverlay />
       <ResumePrompt />

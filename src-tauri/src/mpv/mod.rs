@@ -75,6 +75,9 @@ pub struct MpvState {
     pub eof_reached: bool,
     /// Waiting for the network to fill the cache.
     pub buffering: bool,
+    /// Which load this state belongs to (see MpvHolder::load_gen); lets the
+    /// UI ignore late events from the stream it just left.
+    pub load_gen: u64,
 }
 
 /// One track as reported by mpv's `track-list`. `id` is the `aid`/`sid`
@@ -339,7 +342,9 @@ impl Mpv {
         user_agent: Option<&str>,
         referrer: Option<&str>,
         extra_options: &[String],
-    ) -> Result<()> {
+        gen: u64,
+        superseded: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<bool> {
         stream_url::validate(url)?;
         tracing::info!(
             target: "tenvy_lib",
@@ -373,6 +378,13 @@ impl Mpv {
             let _ = self.command(&[json!("stop")]).await;
             tokio::time::sleep(SWITCH_GAP).await;
         }
+        // Another pick, or Stop, came in while we waited: this one must not
+        // start (it would play unseen, or replace the newer pick).
+        if superseded() {
+            tracing::info!(target: "tenvy_lib", "mpv load superseded before loadfile");
+            return Ok(false);
+        }
+        self.state.lock().await.load_gen = gen;
 
         let mut args = vec![json!("loadfile"), json!(url), json!("replace")];
         if !options.is_empty() {
@@ -383,7 +395,7 @@ impl Mpv {
             args.push(json!(options.join(",")));
         }
         self.command(&args).await?;
-        Ok(())
+        Ok(true)
     }
 
     pub async fn set_pause(&self, paused: bool) -> Result<()> {

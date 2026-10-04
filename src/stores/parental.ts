@@ -72,7 +72,6 @@ export const useParental = create<ParentalState>((set, get) => ({
     const pb = usePlayback.getState()
     if (pb.channel && (await ipc.isChannelLocked(pb.channel.id).catch(() => false))) {
       pb.stop()
-      ipc.mpvStop().catch(() => {})
     }
   },
 

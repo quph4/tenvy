@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Bell, Heart, Pencil, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
+import { usePlayback } from '../../stores/playback'
 import { usePlaylist } from '../../stores/playlist'
 import { useIngest } from '../../stores/ingest'
 import { ipc } from '../../lib/ipc'
@@ -47,6 +48,8 @@ export function SettingsPanel() {
 
   const remove = async (id: number) => {
     try {
+      const pb = usePlayback.getState()
+      if (pb.channel?.sourceId === id) pb.stop()
       await ipc.removeSource(id)
       await hydrate()
     } catch (e) {

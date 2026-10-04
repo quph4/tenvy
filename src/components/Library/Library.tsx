@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Film, MonitorPlay, Square, Tv } from 'lucide-react'
+import { Film, MonitorPlay } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { FAVORITES_GROUP, HISTORY_GROUP, usePlaylist } from '../../stores/playlist'
 import { usePlayback } from '../../stores/playback'
@@ -7,7 +7,6 @@ import { useHistory } from '../../stores/history'
 import { groupByShow, showFromContainer, type LibraryItem, type Show } from '../../lib/series'
 import { parseTitle } from '../../lib/titles'
 import { usePref } from '../../lib/prefs'
-import { cn } from '../../lib/cn'
 import type { Channel } from '../../types'
 import { ListSkeleton, ProgressStripe } from '../ChannelList'
 import { Details } from './Details'
@@ -55,7 +54,6 @@ export function Library() {
     return (
       <div className="flex min-w-0 flex-1 flex-col">
         <Details item={selected} onBack={() => select(null)} />
-        <NowPlayingBar />
       </div>
     )
   }
@@ -98,7 +96,6 @@ export function Library() {
       ) : (
         <PosterGrid cards={cards} />
       )}
-      <NowPlayingBar />
     </div>
   )
 }
@@ -260,41 +257,3 @@ function PosterCard({ card }: { card: Card }) {
   )
 }
 
-/**
- * Shown while something keeps playing in the background (the video is
- * hidden while browsing): what it is, a way back, and a way to stop it.
- */
-function NowPlayingBar() {
-  const channel = usePlayback((s) => s.channel)
-  if (!channel) return null
-  // The player lives on the tab of what's playing (live TV, or the
-  // library's full-width player for a movie/episode).
-  const backToPlayer = () => {
-    const pl = usePlaylist.getState()
-    pl.select(null)
-    pl.setActiveKind(channel.kind).catch(() => {})
-  }
-  return (
-    <div className="flex h-11 shrink-0 items-center gap-3 border-t border-neutral-800/70 bg-neutral-900/90 px-5 text-xs">
-      <span className="h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent-400" />
-      <span className="text-neutral-500">Now playing</span>
-      <span className="truncate font-medium text-neutral-200">{parseTitle(channel.name).title}</span>
-      <div className="ml-auto flex items-center gap-1">
-        <button
-          onClick={backToPlayer}
-          className={cn('inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-neutral-200 hover:bg-neutral-800')}
-        >
-          <Tv className="h-3.5 w-3.5" />
-          Back to player
-        </button>
-        <button
-          onClick={() => usePlayback.getState().stop()}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-100"
-        >
-          <Square className="h-3 w-3" />
-          Stop
-        </button>
-      </div>
-    </div>
-  )
-}

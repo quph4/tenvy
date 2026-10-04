@@ -19,7 +19,6 @@ export async function openInExternalPlayer(): Promise<string> {
   const subtitleTrack = pb.currentSubtitle ?? pb.preferredSubtitleTrack
 
   pb.stop()
-  await ipc.mpvStop().catch(() => {})
   // Give the provider a moment to see our connection close.
   await new Promise((r) => setTimeout(r, 500))
   return ipc.openExternal(channel.id, { audioTrack, subtitleTrack })

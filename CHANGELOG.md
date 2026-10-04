@@ -10,6 +10,20 @@
   check for updates yourself.
 
 ### Fixed
+- The player's Library button (and Stop anywhere) really stops playback;
+  the film used to keep playing unseen.
+- Nothing plays out of sight: on Home, in the guide or the library, a
+  Now playing bar shows what's on, with Back to player, pause and Stop.
+  Reconnecting, volume and mute, and saving a film's position keep
+  working there too.
+- Fast zapping can no longer end on the wrong channel, and Stop during a
+  channel switch no longer lets the stream start anyway.
+- A live channel picked from Favorites under Movies or Shows now plays.
+- The end of a catch-up programme no longer triggers reconnect attempts.
+- Removing the provider of what's playing stops it.
+- Shortcut keys no longer act behind dialogs, or on a player that isn't
+  on screen (arrow keys in the guide scroll instead of zapping).
+- The sleep timer belongs to what was playing when it was set.
 - Manage categories and the PIN prompt are no longer partly hidden
   behind the video while something plays.
 

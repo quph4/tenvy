@@ -32,6 +32,21 @@ pub struct MpvHolder {
     pub inner: Mutex<Option<MpvHandles>>,
     #[cfg(not(windows))]
     pub _priv: Mutex<()>,
+    /// Bumped by every load and every stop. A load still on its way (DB
+    /// lookup, provider call, the switch pause) checks it before starting
+    /// the stream, so fast zapping or Stop can't be overtaken by an older
+    /// request.
+    pub load_gen: std::sync::atomic::AtomicU64,
+}
+
+impl MpvHolder {
+    fn next_gen(&self) -> u64 {
+        self.load_gen.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    }
+    #[cfg(windows)]
+    fn is_current(&self, gen: u64) -> bool {
+        self.load_gen.load(std::sync::atomic::Ordering::SeqCst) == gen
+    }
 }
 
 #[cfg(windows)]
@@ -119,7 +134,8 @@ pub async fn mpv_load(
     channel_id: i64,
     start_seconds: Option<f64>,
     prefs: Option<TrackPrefs>,
-) -> Result<()> {
+) -> Result<u64> {
+    let gen = holder.next_gen();
     super::ensure_playable(&state, channel_id).await?;
     let options = prefs.unwrap_or_default().file_options();
     let db = state.db.clone();
@@ -128,16 +144,18 @@ pub async fn mpv_load(
         .ok_or_else(|| err!("Channel not found"))?;
     #[cfg(windows)]
     {
-        ensure_mpv(&app, &holder)
-            .await?
-            .load(
-                &playback.stream_url,
-                start_seconds,
-                playback.user_agent.as_deref(),
-                playback.referrer.as_deref(),
-                &options,
-            )
-            .await
+        let mpv = ensure_mpv(&app, &holder).await?;
+        mpv.load(
+            &playback.stream_url,
+            start_seconds,
+            playback.user_agent.as_deref(),
+            playback.referrer.as_deref(),
+            &options,
+            gen,
+            &|| !holder.is_current(gen),
+        )
+        .await?;
+        Ok(gen)
     }
     #[cfg(not(windows))]
     {
@@ -157,7 +175,8 @@ pub async fn mpv_load_catchup(
     stop: i64,
     prefs: Option<TrackPrefs>,
     start_seconds: Option<f64>,
-) -> Result<()> {
+) -> Result<u64> {
+    let gen = holder.next_gen();
     super::ensure_playable(&state, channel_id).await?;
     let options = prefs.unwrap_or_default().file_options();
     let url = super::catchup_url(&state, channel_id, start, stop).await?;
@@ -167,10 +186,18 @@ pub async fn mpv_load_catchup(
         .ok_or_else(|| err!("Channel not found"))?;
     #[cfg(windows)]
     {
-        ensure_mpv(&app, &holder)
-            .await?
-            .load(&url, start_seconds, playback.user_agent.as_deref(), playback.referrer.as_deref(), &options)
-            .await
+        let mpv = ensure_mpv(&app, &holder).await?;
+        mpv.load(
+            &url,
+            start_seconds,
+            playback.user_agent.as_deref(),
+            playback.referrer.as_deref(),
+            &options,
+            gen,
+            &|| !holder.is_current(gen),
+        )
+        .await?;
+        Ok(gen)
     }
     #[cfg(not(windows))]
     {
@@ -376,6 +403,8 @@ pub async fn mpv_show_text(holder: State<'_, MpvHolder>, text: String, duration_
 
 #[tauri::command]
 pub async fn mpv_stop(holder: State<'_, MpvHolder>) -> Result<()> {
+    // Cancels any load still on its way, too.
+    holder.next_gen();
     #[cfg(windows)]
     {
         // Stopping a dead mpv is already done — don't respawn just for this.
@@ -422,6 +451,7 @@ pub struct StateSnapshot {
     pub last_error: Option<String>,
     pub eof_reached: bool,
     pub buffering: bool,
+    pub load_gen: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -465,6 +495,7 @@ impl From<crate::mpv::MpvState> for StateSnapshot {
             error_seq: s.error_seq,
             eof_reached: s.eof_reached,
             buffering: s.buffering,
+            load_gen: s.load_gen,
             last_error: s.last_error,
         }
     }

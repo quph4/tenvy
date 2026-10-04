@@ -215,7 +215,8 @@ export const ipc = {
     return invoke('mpv_init')
   },
   /** Play a channel by id; the backend resolves its URL and headers. */
-  async mpvLoad(channelId: number, startSeconds: number | null = null, prefs?: TrackPrefs): Promise<void> {
+  /** Resolves with the load's generation (see MpvState.loadGen). */
+  async mpvLoad(channelId: number, startSeconds: number | null = null, prefs?: TrackPrefs): Promise<number> {
     return invoke('mpv_load', { channelId, startSeconds, prefs: prefs ?? null })
   },
   /** Play a past or ongoing programme from the provider's archive.
@@ -226,7 +227,7 @@ export const ipc = {
     stop: number,
     prefs?: TrackPrefs,
     startSeconds: number | null = null,
-  ): Promise<void> {
+  ): Promise<number> {
     return invoke('mpv_load_catchup', { channelId, start, stop, prefs: prefs ?? null, startSeconds })
   },
   /** Whether a channel is in a locked category (and locked right now). */
