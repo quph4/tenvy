@@ -137,22 +137,28 @@ await js(`(async () => {
   await pl.getState().setActiveKind('movie'); await wait(1200)
   await pl.getState().setActiveKind('series'); await wait(1000)
   await pl.getState().setActiveKind('live'); await wait(600)
-  ;(await import('/src/stores/ui.ts')).useUI.getState().setView('epg'); await wait(800)
+  ;(await import('/src/stores/ui.ts')).useUI.getState().setView('home'); await wait(800)
 })()`)
 await js('__d.titleCard(true)')
 await sleep(600)
 await send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 })
 await sleep(3200)
 
-// 1. Guide
-await js(`(async () => { (await import('/src/stores/ui.ts')).useUI.getState().setView('epg') })()`)
-await sleep(400)
+// 1. Home
 await js('__d.titleCard(false)')
 mark({ type: 'card', on: false })
 await sleep(700)
+await caption('Pick up right where you left off')
+await sleep(1200)
+await moveTo(W * 0.15, H * 0.42)
+await sleep(1600)
+
+// 2. Guide
+await click(`__d.byText('Guide', 'header button')`)
+await sleep(900)
 await caption('A real TV guide for your IPTV')
 await sleep(1600)
-await click(`__d.programme('Arena Sport 1', 1)`)
+await click(`__d.programme('Arena Sport 1', 3)`)
 await sleep(1200)
 await caption('Catch-up, start over and reminders')
 await click(`__d.byText('Remind me', 'button')`)
@@ -180,7 +186,7 @@ await js('__d.scrollMain(-420, 1200)')
 await sleep(1500)
 
 // 4. Details
-await caption('Pick up right where you left off')
+await caption('Plot, cast and resume for every film')
 await click(`__d.byText('Midnight Orchard', 'div, span, p')`)
 await sleep(2800)
 
