@@ -1,8 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-10-04
 
 ### Added
+- Playlists and the guide update themselves daily, quietly in the
+  background (Settings → Playback; on by default).
+- The guide has a search box, shows which category it's showing (pick
+  one, or Favorites, in the sidebar) and leaves out provider section
+  titles.
 - Settings → About: "Report a problem" (opens a short report form) and
   "Copy diagnostics" (version, library counts and the end of the log,
   with addresses and logins removed) to paste into it.

@@ -25,6 +25,9 @@ pub struct AppState {
     /// spares the provider's API.
     pub details_cache: std::sync::Mutex<HashMap<i64, (Instant, VodDetails)>>,
     pub parental: crate::parental::Parental,
+    /// Sources being imported right now: a daily background refresh and a
+    /// click on Refresh must not import the same source at once.
+    pub refreshing: std::sync::Mutex<std::collections::HashSet<i64>>,
 }
 
 const DETAILS_TTL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -33,6 +36,7 @@ impl AppState {
     pub fn new(db: Db) -> Self {
         Self {
             parental: crate::parental::Parental::load(&db),
+            refreshing: std::sync::Mutex::new(std::collections::HashSet::new()),
             db,
             http: reqwest::Client::builder()
                 .user_agent(concat!("Tenvy/", env!("CARGO_PKG_VERSION")))
@@ -102,7 +106,13 @@ pub async fn refresh_source(
     state: State<'_, AppState>,
     id: i64,
 ) -> Result<()> {
-    ingest(&app, &state, id).await
+    let fresh = state.refreshing.lock().unwrap_or_else(|e| e.into_inner()).insert(id);
+    if !fresh {
+        return Err(err!("This playlist is already being updated."));
+    }
+    let result = ingest(&app, &state, id).await;
+    state.refreshing.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    result
 }
 
 #[tauri::command]

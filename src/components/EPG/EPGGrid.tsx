@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { listen } from '@tauri-apps/api/event'
-import { usePlaylist } from '../../stores/playlist'
+import { FAVORITES_GROUP, HISTORY_GROUP, usePlaylist } from '../../stores/playlist'
+import { isSeparator } from '../../lib/channels'
 import { usePlayback } from '../../stores/playback'
 import { ipc, subscribe } from '../../lib/ipc'
 import { DAY, floorToMinutes, hhmm, HOUR, weekday } from '../../lib/time'
-import { Bell, ChevronLeft, ChevronRight, History } from 'lucide-react'
+import { Bell, ChevronLeft, ChevronRight, History, Search, X } from 'lucide-react'
 import { useReminders } from '../../stores/reminders'
 import { ProgrammeCard } from './ProgrammeCard'
 import type { Channel, Programme } from '../../types'
@@ -21,7 +22,17 @@ const HISTORY_HOURS = 2
 const MAX_DAYS = 7
 
 export function EPGGrid() {
-  const { channels } = usePlaylist()
+  const { channels: listed, activeGroup } = usePlaylist()
+  // The guide follows the category picked in the sidebar (or Favorites);
+  // provider section titles aren't channels, and the search box narrows
+  // it down further.
+  const [query, setQuery] = useState('')
+  const channels = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return listed.filter((c) => c.kind === 'live' && !isSeparator(c) && (!q || c.name.toLowerCase().includes(q)))
+  }, [listed, query])
+  const scope =
+    activeGroup === FAVORITES_GROUP ? 'Favorites' : activeGroup === HISTORY_GROUP ? 'History' : activeGroup ?? 'All channels'
   const requestPlay = usePlayback((s) => s.requestPlay)
   const playCatchup = usePlayback((s) => s.playCatchup)
   const setView = useUI((s) => s.setView)
@@ -128,6 +139,9 @@ export function EPGGrid() {
     <div className="flex flex-1 flex-col bg-neutral-950 overflow-hidden">
       <div className="flex h-10 shrink-0 items-center border-b border-neutral-800/70 bg-neutral-950/80 px-5 text-xs text-neutral-500">
         <span className="font-semibold uppercase tracking-wider text-neutral-400">Guide</span>
+        <span className="ml-2 max-w-[14rem] truncate text-neutral-500" title="Pick a category or Favorites in the sidebar">
+          · {scope}
+        </span>
         <span className="ml-3 text-neutral-600">{weekday(windowStart + HISTORY_HOURS * HOUR)}</span>
         <div className="ml-4 flex items-center gap-1">
           <DayButton disabled={dayOffset <= -MAX_DAYS} onClick={() => setDayOffset(dayOffset - 1)} label="Previous day">
@@ -144,7 +158,28 @@ export function EPGGrid() {
             <ChevronRight className="h-3.5 w-3.5" />
           </DayButton>
         </div>
-        <span className="ml-auto flex items-center gap-3 text-neutral-600">
+        <div className="relative ml-auto w-48">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-neutral-500" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) {
+                e.stopPropagation()
+                setQuery('')
+              }
+            }}
+            placeholder="Find a channel"
+            aria-label="Find a channel in the guide"
+            className="h-6 w-full rounded border border-neutral-800 bg-neutral-900 pl-6 pr-6 text-[11px] text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-accent-400"
+          />
+          {query && (
+            <button onClick={() => setQuery('')} aria-label="Clear" className="absolute right-1.5 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300">
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <span className="ml-4 flex items-center gap-3 text-neutral-600">
           <span className="inline-flex items-center gap-1">
             <History className="h-3 w-3 text-amber-400/80" /> catch-up
           </span>

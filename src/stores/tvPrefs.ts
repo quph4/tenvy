@@ -9,16 +9,20 @@ import type { Channel, MpvTrack, TrackPrefs } from '../types'
 interface TvPrefsState {
   tracks: TrackPrefs
   startWithLastChannel: boolean
+  /** Re-import providers not updated for a day, in the background. */
+  dailyRefresh: boolean
   /** The user picked an audio track; remember its language. */
   pickedAudio(track: MpvTrack | undefined): void
   /** The user picked a subtitle track, or turned subtitles off (undefined). */
   pickedSubtitle(track: MpvTrack | undefined): void
   resetTracks(): void
   setStartWithLastChannel(on: boolean): void
+  setDailyRefresh(on: boolean): void
 }
 
 const TRACKS_KEY = 'tenvy.trackPrefs'
 const START_KEY = 'tenvy.startWithLastChannel'
+const REFRESH_KEY = 'tenvy.dailyRefresh'
 const LAST_KEY = 'tenvy.lastChannelId'
 
 const NO_PREFS: TrackPrefs = { audioLang: null, subLang: null, subsOff: false }
@@ -43,6 +47,7 @@ function write(key: string, value: unknown) {
 export const useTvPrefs = create<TvPrefsState>((set, get) => ({
   tracks: read(TRACKS_KEY, NO_PREFS),
   startWithLastChannel: read<{ on: boolean }>(START_KEY, { on: false }).on,
+  dailyRefresh: read<{ on: boolean }>(REFRESH_KEY, { on: true }).on,
 
   pickedAudio(track) {
     if (!track?.lang) return
@@ -60,6 +65,10 @@ export const useTvPrefs = create<TvPrefsState>((set, get) => ({
   resetTracks() {
     set({ tracks: NO_PREFS })
     write(TRACKS_KEY, NO_PREFS)
+  },
+  setDailyRefresh(on) {
+    set({ dailyRefresh: on })
+    write(REFRESH_KEY, { on })
   },
   setStartWithLastChannel(on) {
     set({ startWithLastChannel: on })

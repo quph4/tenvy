@@ -1,6 +1,6 @@
 [package]
 name = "tenvy"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop IPTV player with EPG, watch history, and embedded mpv."
 authors = ["Tenvy"]
 license = "LicenseRef-Proprietary"

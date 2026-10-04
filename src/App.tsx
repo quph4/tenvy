@@ -30,6 +30,7 @@ import { openSupportLink, startAppInfo, useAppInfo } from './stores/appInfo'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
 import { ipc, subscribe } from './lib/ipc'
 import { startToastMirror } from './lib/osd'
+import { startAutoRefresh } from './stores/autoRefresh'
 import { lastChannelId, useTvPrefs } from './stores/tvPrefs'
 import { Heart } from 'lucide-react'
 
@@ -86,6 +87,7 @@ function App() {
     if (sourceIds) useAccounts.getState().loadAll(usePlaylist.getState().sources).catch(() => {})
   }, [sourceIds])
   useEffect(() => startToastMirror(), [])
+  useEffect(() => startAutoRefresh(), [])
   const support = useAppInfo((s) => s.info?.config.support ?? null)
 
   // Nothing plays where you can't see it. Going to Movies or Shows from

@@ -80,7 +80,7 @@ export const tests = [
       ctx.page(async (t) => {
         t.key('g')
         await t.until(() => document.querySelector('[aria-label="Next day"]'), 'guide')
-        const day = () => t.text().match(/GUIDE\s+(\w+, \w+ \d+)/)?.[1]
+        const day = () => t.text().match(/(\w{3}, \w{3} \d{1,2})/)?.[1]
         const today = day()
         t.clickLabel('Next day')
         await t.until(() => day() && day() !== today, 'next day')
@@ -99,6 +99,24 @@ export const tests = [
         t.clickText('Watch (catch-up)')
         const pb = await t.pb()
         await t.until(() => pb.getState().catchup && (pb.getState().timePos ?? 0) > 2, 'catch-up playing', 20000)
+      }),
+  },
+  {
+    name: 'Guide: search narrows the rows, section titles left out',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        ;(await t.ui()).getState().setView('epg')
+        await t.until(() => document.querySelector('input[aria-label="Find a channel in the guide"]'), 'guide search')
+        const rowNames = () => [...document.querySelectorAll('.sticky.left-0.z-10 span.truncate')].map((e) => e.textContent)
+        await t.until(() => rowNames().length >= 5, 'guide rows')
+        if (rowNames().some((n) => n.includes('-='))) throw new Error('section title shown as a guide row')
+        t.setInput(document.querySelector('input[aria-label="Find a channel in the guide"]'), 'sport')
+        await t.until(() => rowNames().length === 2 && rowNames().every((n) => n.includes('Sport')), 'only Sport rows')
+        t.setInput(document.querySelector('input[aria-label="Find a channel in the guide"]'), '')
+        ;(await t.ui()).getState().setView('player')
       }),
   },
   {
@@ -313,6 +331,10 @@ export const tests = [
     name: 'Diagnostics: useful and free of logins',
     run: (ctx) =>
       ctx.page(async (t) => {
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await pl.getState().setActiveGroup(null)
+        ;(await t.ui()).getState().setView('player')
         ;(await t.pb()).getState().play(await t.live('Test One HD'))
         await t.playing('Test One HD')
         const text = await (await t.ipc()).diagnostics()
@@ -450,6 +472,27 @@ export const tests = [
         if (pl.getState().sources[0].name !== 'Test provider') throw new Error('not renamed')
         const favs = await ipc.listFavorites()
         if (favs.length !== 3) throw new Error(`favorites after refresh: ${favs.length}`)
+      }),
+  },
+  {
+    name: 'Daily refresh: a day-old provider is re-imported quietly',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const ipc = await t.ipc()
+        const pl = await t.pl()
+        const id = pl.getState().sources[0].id
+        const before = (await ipc.listSources())[0].updatedAt
+        // Two imports of one provider at once are refused.
+        const both = await Promise.allSettled([ipc.refreshSource(id), ipc.refreshSource(id)])
+        if (!both.some((r) => r.status === 'rejected' && String(r.reason).includes('already'))) throw new Error('second import was not refused')
+        // Pretend the last import was two days ago, then let the check run.
+        pl.setState({ sources: pl.getState().sources.map((s) => ({ ...s, updatedAt: s.updatedAt - 2 * 86400 })) })
+        const { autoRefreshNow } = await import('/src/stores/autoRefresh.ts')
+        await autoRefreshNow()
+        const after = (await ipc.listSources())[0].updatedAt
+        if (!(after >= before)) throw new Error(`not re-imported (${before} → ${after})`)
+        if ((await import('/src/stores/ingest.ts')).useIngest.getState().status) throw new Error('import overlay shown for a background refresh')
+        if ((await ipc.listFavorites()).length !== 3) throw new Error('favorites lost')
       }),
   },
   {

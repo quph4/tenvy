@@ -322,7 +322,7 @@ function AccountLine({ sourceId }: { sourceId: number }) {
 }
 
 function PlaybackSection() {
-  const { tracks, startWithLastChannel, setStartWithLastChannel, resetTracks } = useTvPrefs()
+  const { tracks, startWithLastChannel, setStartWithLastChannel, resetTracks, dailyRefresh, setDailyRefresh } = useTvPrefs()
   const audio = languageName(tracks.audioLang)
   const subs = tracks.subsOff ? 'Off' : languageName(tracks.subLang)
   return (
@@ -337,6 +337,18 @@ function PlaybackSection() {
           type="checkbox"
           checked={startWithLastChannel}
           onChange={(e) => setStartWithLastChannel(e.target.checked)}
+          className="h-4 w-4 accent-[#D4B47C]"
+        />
+      </label>
+      <label className="mt-4 flex cursor-pointer items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-neutral-200">Update playlists daily</span>
+          <span className="block text-[11px] text-neutral-500">New channels, films and the guide arrive by themselves, in the background.</span>
+        </span>
+        <input
+          type="checkbox"
+          checked={dailyRefresh}
+          onChange={(e) => setDailyRefresh(e.target.checked)}
           className="h-4 w-4 accent-[#D4B47C]"
         />
       </label>
