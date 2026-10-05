@@ -3,6 +3,8 @@ import { parseTitle } from '../lib/titles'
 import { FAVORITES_GROUP, HISTORY_GROUP, usePlaylist } from '../stores/playlist'
 import { usePlayback } from '../stores/playback'
 import { useUI } from '../stores/ui'
+import { useUpNext } from '../stores/upNext'
+import { UpNext } from './Player/UpNext'
 
 /**
  * Shown whenever something plays while the player isn't on screen (Home,
@@ -12,6 +14,7 @@ import { useUI } from '../stores/ui'
 export function NowPlayingBar() {
   const channel = usePlayback((s) => s.channel)
   const playing = usePlayback((s) => s.playing)
+  const counting = useUpNext((s) => s.startsAt != null)
   if (!channel) return null
 
   const backToPlayer = () => {
@@ -24,9 +27,15 @@ export function NowPlayingBar() {
 
   return (
     <div className="flex h-11 shrink-0 items-center gap-3 border-t border-neutral-800/70 bg-neutral-900/95 px-5 text-xs">
-      <span className={playing ? 'h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent-400' : 'h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-600'} />
-      <span className="text-neutral-500">{playing ? 'Now playing' : 'Paused'}</span>
-      <span className="truncate font-medium text-neutral-200">{parseTitle(channel.name).title}</span>
+      {counting ? (
+        <UpNext compact />
+      ) : (
+        <>
+          <span className={playing ? 'h-1.5 w-1.5 shrink-0 animate-pulse-dot rounded-full bg-accent-400' : 'h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-600'} />
+          <span className="text-neutral-500">{playing ? 'Now playing' : 'Paused'}</span>
+          <span className="truncate font-medium text-neutral-200">{parseTitle(channel.name).title}</span>
+        </>
+      )}
       <div className="ml-auto flex items-center gap-1">
         <button
           onClick={backToPlayer}

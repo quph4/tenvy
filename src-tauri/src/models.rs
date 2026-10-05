@@ -122,6 +122,9 @@ pub struct Group {
     /// Behind the parental PIN.
     #[serde(default)]
     pub locked: bool,
+    /// Locked because its name holds a parental keyword (not a toggle).
+    #[serde(default)]
+    pub locked_by_word: bool,
 }
 
 /// An Xtream account's subscription details (never the password).

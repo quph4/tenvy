@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, Heart, Pencil, Plus, RefreshCcw, Trash2, X } from 'lucide-react'
+import { Bell, Download, Heart, Pencil, Plus, RefreshCcw, Trash2, Upload, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
 import { usePlayback } from '../../stores/playback'
 import { usePlaylist } from '../../stores/playlist'
@@ -11,10 +11,12 @@ import { useUpdater } from '../../stores/updater'
 import { useReminders } from '../../stores/reminders'
 import { openSupportLink, useAppInfo } from '../../stores/appInfo'
 import { languageName, useTvPrefs } from '../../stores/tvPrefs'
+import { UP_NEXT_SECONDS } from '../../stores/upNext'
 import { daysLeft, expiryLabel, useAccounts } from '../../stores/accounts'
 import { ParentalSection } from './ParentalSection'
 import { cn } from '../../lib/cn'
 import { hhmm, weekday } from '../../lib/time'
+import { describeRestore, restoreBackup, saveBackup } from '../../lib/backup'
 
 export function SettingsPanel() {
   const { settingsOpen, toggleSettings, openAddSource } = useUI()
@@ -60,7 +62,7 @@ export function SettingsPanel() {
   return (
     <div className="fixed inset-0 z-40 grid place-items-end bg-black/50 animate-fade-in" onClick={toggleSettings}>
       <aside
-        className="flex h-full w-96 flex-col border-l border-neutral-800 bg-neutral-900 shadow-2xl"
+        className="flex h-full min-h-0 w-96 flex-col border-l border-neutral-800 bg-neutral-900 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-neutral-800 px-5 py-3">
@@ -73,7 +75,10 @@ export function SettingsPanel() {
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        {/* Everything below the title scrolls as one: the sections are
+            taller than many screens. */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="p-5">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
               Playlists
@@ -127,8 +132,11 @@ export function SettingsPanel() {
 
         <ParentalSection />
         <PlaybackSection />
+        <GuideSection />
         <RemindersSection />
+        <BackupSection />
         <AboutSection />
+        </div>
       </aside>
     </div>
   )
@@ -325,7 +333,8 @@ function AccountLine({ sourceId }: { sourceId: number }) {
 }
 
 function PlaybackSection() {
-  const { tracks, startWithLastChannel, setStartWithLastChannel, resetTracks, dailyRefresh, setDailyRefresh } = useTvPrefs()
+  const { tracks, startWithLastChannel, setStartWithLastChannel, resetTracks, dailyRefresh, setDailyRefresh, autoNext, setAutoNext } =
+    useTvPrefs()
   const audio = languageName(tracks.audioLang)
   const subs = tracks.subsOff ? 'Off' : languageName(tracks.subLang)
   return (
@@ -340,6 +349,18 @@ function PlaybackSection() {
           type="checkbox"
           checked={startWithLastChannel}
           onChange={(e) => setStartWithLastChannel(e.target.checked)}
+          className="h-4 w-4 accent-[#D4B47C]"
+        />
+      </label>
+      <label className="mt-4 flex cursor-pointer items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-neutral-200">Play the next episode automatically</span>
+          <span className="block text-[11px] text-neutral-500">When an episode ends, the next one starts after {UP_NEXT_SECONDS} seconds.</span>
+        </span>
+        <input
+          type="checkbox"
+          checked={autoNext}
+          onChange={(e) => setAutoNext(e.target.checked)}
           className="h-4 w-4 accent-[#D4B47C]"
         />
       </label>
@@ -373,6 +394,133 @@ function PlaybackSection() {
           </button>
         )}
       </div>
+    </div>
+  )
+}
+
+/** −6 h … +6 h in half hours. */
+const OFFSETS = Array.from({ length: 25 }, (_, i) => (i - 12) * 30)
+
+function offsetLabel(m: number): string {
+  if (m === 0) return 'As the provider sends it'
+  const h = Math.floor(Math.abs(m) / 60)
+  const rest = Math.abs(m) % 60
+  const amount = [h ? `${h} h` : '', rest ? `${rest} min` : ''].filter(Boolean).join(' ')
+  return `${amount} ${m > 0 ? 'later' : 'earlier'}`
+}
+
+function GuideSection() {
+  const [offset, setOffset] = useState<number | null>(null)
+  const push = useToast((s) => s.push)
+  useEffect(() => {
+    ipc.epgOffset().then(setOffset).catch(() => setOffset(0))
+  }, [])
+  const change = async (minutes: number) => {
+    const before = offset
+    setOffset(minutes)
+    try {
+      await ipc.setEpgOffset(minutes)
+      useReminders.getState().load().catch(() => {})
+    } catch (e) {
+      setOffset(before)
+      push('error', `Couldn't change the guide time: ${e}`)
+    }
+  }
+  return (
+    <div className="border-t border-neutral-800 p-5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Guide</span>
+      <label className="mt-3 flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm text-neutral-200">Guide times</span>
+          <span className="block text-[11px] text-neutral-500">If programmes start earlier or later than the guide says, move the guide to match.</span>
+        </span>
+        <select
+          aria-label="Guide time adjustment"
+          value={offset ?? 0}
+          disabled={offset == null}
+          onChange={(e) => change(Number(e.target.value))}
+          className="h-8 shrink-0 rounded-md border border-neutral-800 bg-neutral-950 px-2 text-xs text-neutral-200 outline-none focus:border-accent-400/60"
+        >
+          {OFFSETS.map((m) => (
+            <option key={m} value={m}>
+              {offsetLabel(m)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+/** Save everything to a file, or bring it back (e.g. on a new PC). */
+function BackupSection() {
+  const [busy, setBusy] = useState<null | 'save' | 'restore'>(null)
+  const [note, setNote] = useState<{ text: string; error?: boolean; details?: string[] } | null>(null)
+
+  const save = async () => {
+    setBusy('save')
+    setNote(null)
+    try {
+      const path = await saveBackup()
+      if (path) setNote({ text: `Saved to ${path}` })
+    } catch (e) {
+      setNote({ text: `Couldn't save the backup: ${String(e).replace(/^Error:\s*/, '')}`, error: true })
+    } finally {
+      setBusy(null)
+    }
+  }
+  const restore = async () => {
+    setBusy('restore')
+    setNote(null)
+    try {
+      const report = await restoreBackup()
+      if (report) {
+        setNote({
+          text: describeRestore(report),
+          error: report.sourcesFailed.length > 0,
+          details: report.sourcesFailed.map((f) => `Couldn't add ${f}`),
+        })
+      }
+    } catch (e) {
+      setNote({ text: String(e).replace(/^Error:\s*/, ''), error: true })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="border-t border-neutral-800 p-5">
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Backup</span>
+      <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">
+        Providers, favorites, hidden channels and categories, what you've watched, the parental lock and your settings — in one
+        file, to move Tenvy to another PC. Keep the file to yourself: it holds your provider logins.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={save}
+          disabled={busy !== null}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-800 px-3 text-xs text-neutral-200 hover:border-neutral-700 disabled:opacity-50"
+        >
+          <Download className="h-3.5 w-3.5" />
+          {busy === 'save' ? 'Saving…' : 'Save a backup…'}
+        </button>
+        <button
+          onClick={restore}
+          disabled={busy !== null}
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-800 px-3 text-xs text-neutral-200 hover:border-neutral-700 disabled:opacity-50"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          {busy === 'restore' ? 'Restoring…' : 'Restore from a backup…'}
+        </button>
+      </div>
+      {note && (
+        <div role="status" className={cn('mt-2 text-[11px] leading-relaxed', note.error ? 'text-amber-300' : 'text-neutral-400')}>
+          <p className="break-all">{note.text}</p>
+          {note.details?.map((d) => (
+            <p key={d}>{d}</p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

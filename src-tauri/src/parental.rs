@@ -14,7 +14,7 @@ use crate::err;
 use crate::error::Result;
 use crate::models::ParentalStatus;
 
-const META_KEY: &str = "parental_pin";
+pub(crate) const META_KEY: &str = "parental_pin";
 
 pub struct Parental {
     state: Mutex<State>,
@@ -83,6 +83,22 @@ impl Parental {
         s.hash = stored;
         s.unlocked = false;
         Ok(())
+    }
+}
+
+impl Parental {
+    /// Take over the PIN from a backup — only when none is set here.
+    /// True if it was taken.
+    pub fn adopt(&self, db: &Db, stored: &str) -> Result<bool> {
+        let mut s = self.state();
+        let well_formed = stored.split_once(':').is_some_and(|(salt, hash)| unhex(salt).is_some() && unhex(hash).is_some());
+        if s.hash.is_some() || !well_formed {
+            return Ok(false);
+        }
+        db::set_meta(db, META_KEY, stored)?;
+        s.hash = Some(stored.to_string());
+        s.unlocked = false;
+        Ok(true)
     }
 }
 

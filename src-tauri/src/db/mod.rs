@@ -10,6 +10,8 @@ use crate::models::{
     Channel, Group, HistoryEntry, HistoryProgress, Programme, Reminder, Source, SourceKind, SourceStats,
 };
 
+pub mod backup;
+
 const SCHEMA_SQL: &str = include_str!("schema.sql");
 
 /// Shared database handle: one connection for writes and one for reads.
@@ -41,17 +43,37 @@ pub fn open(path: &Path) -> Result<Db> {
     }
     let write = Connection::open(path)?;
     write.busy_timeout(Duration::from_secs(10))?;
+    register_functions(&write)?;
     write.execute_batch(SCHEMA_SQL)?;
     migrate(&write)?;
 
     let read = Connection::open(path)?;
     read.busy_timeout(Duration::from_secs(10))?;
+    register_functions(&read)?;
     read.execute_batch("PRAGMA query_only = ON; PRAGMA temp_store = MEMORY;")?;
 
     Ok(Db {
         write: Arc::new(Mutex::new(write)),
         read: Arc::new(Mutex::new(read)),
     })
+}
+
+/// SQL functions the queries use. `tenvy_fold(text)`: lowercase for
+/// matching, beyond ASCII too (SQLite's own lower() leaves "Ö" alone).
+fn register_functions(conn: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    conn.create_scalar_function(
+        "tenvy_fold",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| Ok(ctx.get::<Option<String>>(0)?.map(|s| fold(&s)).unwrap_or_default()),
+    )?;
+    Ok(())
+}
+
+/// How names and parental keywords are compared.
+pub fn fold(s: &str) -> String {
+    s.to_lowercase()
 }
 
 /// Lightweight column-level migrations. SQLite has no `ADD COLUMN IF NOT
@@ -115,6 +137,9 @@ fn migrate(conn: &Connection) -> Result<()> {
              locked    INTEGER NOT NULL DEFAULT 0,
              PRIMARY KEY (source_id, kind, name)
          ) WITHOUT ROWID;
+         CREATE TABLE IF NOT EXISTS lock_words (
+             word TEXT PRIMARY KEY
+         ) WITHOUT ROWID;
          CREATE TABLE IF NOT EXISTS meta (
              key   TEXT PRIMARY KEY,
              value TEXT NOT NULL
@@ -170,11 +195,17 @@ fn visibility_clause(skip_hidden: bool, unlocked: bool) -> Option<String> {
         (false, false) => "gp.locked = 1",
         (true, false) => "(gp.hidden = 1 OR gp.locked = 1)",
     };
-    Some(format!(
+    let groups = format!(
         "NOT EXISTS (SELECT 1 FROM group_prefs gp WHERE gp.source_id = c.source_id AND gp.kind = c.kind \
            AND gp.name = COALESCE(NULLIF(c.group_name, ''), 'Uncategorized') AND {cond})"
-    ))
+    );
+    Some(if unlocked { groups } else { format!("{groups} AND NOT {WORD_LOCKED}") })
 }
+
+/// SQL condition: the channel aliased `c` has a parental keyword in its
+/// name or its category's name.
+const WORD_LOCKED: &str = "EXISTS (SELECT 1 FROM lock_words w \
+     WHERE instr(tenvy_fold(c.name), w.word) > 0 OR instr(tenvy_fold(COALESCE(c.group_name, '')), w.word) > 0)";
 
 fn column_exists(conn: &Connection, table: &str, col: &str) -> Result<bool> {
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
@@ -609,6 +640,7 @@ pub fn list_groups(
                 count,
                 hidden: false,
                 locked: false,
+                locked_by_word: false,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -625,6 +657,7 @@ pub fn list_groups(
         let (name, hidden, locked) = row?;
         prefs.insert(name, (hidden, locked));
     }
+    let words = lock_words_on(&conn)?;
     let rows = rows
         .into_iter()
         .map(|mut g| {
@@ -632,6 +665,9 @@ pub fn list_groups(
                 g.hidden = *hidden;
                 g.locked = *locked;
             }
+            let name = fold(&g.name);
+            g.locked_by_word = words.iter().any(|w| name.contains(w.as_str()));
+            g.locked |= g.locked_by_word;
             g
         })
         .collect();
@@ -777,19 +813,61 @@ pub fn recently_added(db: &Db, kind: &str, limit: i64, unlocked: bool) -> Result
     Ok(rows)
 }
 
-/// Whether a channel (or an episode's show) sits in a locked category.
+/// Whether a channel (or an episode's show) sits in a locked category, or
+/// has a parental keyword in its name or its category's.
 pub fn is_locked(db: &Db, channel_id: i64) -> Result<bool> {
     Ok(db
         .read()
         .query_row(
-            "SELECT 1 FROM channels c JOIN group_prefs gp ON gp.source_id = c.source_id AND gp.kind = c.kind
-               AND gp.name = COALESCE(NULLIF(c.group_name, ''), 'Uncategorized')
-             WHERE c.id = COALESCE((SELECT parent_id FROM channels WHERE id = ?1), ?1) AND gp.locked = 1",
+            &format!(
+                "SELECT 1 FROM channels c
+                  WHERE c.id = COALESCE((SELECT parent_id FROM channels WHERE id = ?1), ?1)
+                    AND (EXISTS (SELECT 1 FROM group_prefs gp WHERE gp.source_id = c.source_id AND gp.kind = c.kind
+                           AND gp.name = COALESCE(NULLIF(c.group_name, ''), 'Uncategorized') AND gp.locked = 1)
+                         OR {WORD_LOCKED})"
+            ),
             [channel_id],
             |_| Ok(()),
         )
         .optional()?
         .is_some())
+}
+
+// ---------- parental keywords ----------
+
+fn lock_words_on(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT word FROM lock_words ORDER BY word")?;
+    let words = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(words)
+}
+
+/// Words that lock any category or title whose name holds them.
+pub fn lock_words(db: &Db) -> Result<Vec<String>> {
+    lock_words_on(&db.read())
+}
+
+/// Replace the parental keywords. Stored folded, trimmed and deduplicated.
+pub fn set_lock_words(db: &Db, words: &[String]) -> Result<Vec<String>> {
+    let mut clean: Vec<String> = words
+        .iter()
+        .map(|w| fold(w.trim()))
+        .filter(|w| !w.is_empty())
+        .map(|w| w.chars().take(40).collect())
+        .collect();
+    clean.sort();
+    clean.dedup();
+    clean.truncate(100);
+    let mut conn = db.write();
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM lock_words", [])?;
+    {
+        let mut stmt = tx.prepare("INSERT INTO lock_words (word) VALUES (?1)")?;
+        for w in &clean {
+            stmt.execute([w])?;
+        }
+    }
+    tx.commit()?;
+    Ok(clean)
 }
 
 // ---------- favorites ----------
@@ -1156,7 +1234,56 @@ fn row_to_programme(r: &rusqlite::Row) -> rusqlite::Result<Programme> {
     })
 }
 
-/// Programmes overlapping `[from, to)` for the given guide ids.
+/// `meta` key: minutes added to every guide time (a guide that runs an
+/// hour off is common with third-party XMLTV files).
+pub const EPG_OFFSET_KEY: &str = "epg_offset_minutes";
+
+/// The guide time adjustment, in seconds.
+fn epg_offset_secs(conn: &Connection) -> i64 {
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [EPG_OFFSET_KEY], |r| r.get::<_, String>(0))
+        .optional()
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0)
+        * 60
+}
+
+pub fn epg_offset_minutes(db: &Db) -> Result<i64> {
+    Ok(epg_offset_secs(&db.read()) / 60)
+}
+
+/// Set the guide time adjustment. Reminders were set on adjusted times,
+/// so they move along with it.
+pub fn set_epg_offset_minutes(db: &Db, minutes: i64) -> Result<()> {
+    let mut conn = db.write();
+    let delta = minutes * 60 - epg_offset_secs(&conn);
+    let tx = conn.transaction()?;
+    tx.execute(
+        "INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![EPG_OFFSET_KEY, minutes.to_string()],
+    )?;
+    if delta != 0 {
+        // Via a copy: shifting in place could collide on (channel_id, start).
+        tx.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS shifted_reminders AS SELECT * FROM reminders WHERE 0;
+             DELETE FROM shifted_reminders;
+             INSERT INTO shifted_reminders SELECT * FROM reminders;
+             DELETE FROM reminders;",
+        )?;
+        tx.execute(
+            "INSERT INTO reminders (channel_id, start, stop, title)
+             SELECT channel_id, start + ?1, stop + ?1, title FROM shifted_reminders",
+            [delta],
+        )?;
+        tx.execute("DELETE FROM shifted_reminders", [])?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Programmes overlapping `[from, to)` for the given guide ids, with the
+/// guide time adjustment applied.
 pub fn programmes_for_channels(
     db: &Db,
     tvg_ids: &[String],
@@ -1167,6 +1294,7 @@ pub fn programmes_for_channels(
         return Ok(vec![]);
     }
     let conn = db.read();
+    let offset = epg_offset_secs(&conn);
     let placeholders = vec!["?"; tvg_ids.len()].join(",");
     let sql = format!(
         "SELECT channel_tvg_id, start, stop, title, description
@@ -1178,13 +1306,17 @@ pub fn programmes_for_channels(
         .iter()
         .map(|s| Box::new(s.to_lowercase()) as Box<dyn rusqlite::ToSql>)
         .collect();
-    args.push(Box::new(from));
-    args.push(Box::new(to));
+    args.push(Box::new(from - offset));
+    args.push(Box::new(to - offset));
     let refs: Vec<&dyn rusqlite::ToSql> = args.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt
+    let mut rows = stmt
         .query_map(refs.as_slice(), row_to_programme)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    for p in &mut rows {
+        p.start += offset;
+        p.stop += offset;
+    }
     Ok(rows)
 }
 
@@ -1203,6 +1335,7 @@ mod tests {
 
     fn test_db() -> Db {
         let conn = Connection::open_in_memory().unwrap();
+        register_functions(&conn).unwrap();
         conn.execute_batch(SCHEMA_SQL).unwrap();
         migrate(&conn).unwrap();
         // Separate in-memory connections would be separate databases, so
@@ -1258,6 +1391,134 @@ mod tests {
         // The show disappearing takes its episodes with it.
         replace_channels(&db, sid, ALL_KINDS, &[]).unwrap();
         assert!(list_episodes(&db, show_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn backup_restores_by_identity_into_another_library() {
+        // Where it was saved: an Xtream provider with a favorite, a hidden
+        // channel, a hidden category, a film and an episode watched.
+        let home = test_db();
+        let url = "http://p.example";
+        let sid = insert_source(&home, &SourceKind::Xtream, "Prov", url, Some("u"), Some("p")).unwrap();
+        let live = |id: i64, name: &str| ch(name, &format!("{url}/live/u/p/{id}.ts"));
+        let mut film = ch("Film", &format!("{url}/movie/u/p/900.mp4"));
+        film.kind = "movie".into();
+        let mut show = ch("Show", &format!("{url}/series/u/p/77"));
+        show.kind = "series".into();
+        show.container = true;
+        replace_channels(&home, sid, ALL_KINDS, &[live(1, "One"), live(2, "Two"), live(3, "Three"), film.clone(), show.clone()]).unwrap();
+        let id_in = |db: &Db, name: &str| {
+            list_channels(db, None, None, None, true).unwrap().into_iter().find(|c| c.name == name).unwrap().id
+        };
+        let mut ep = ch("Show S01E02", &format!("{url}/series/u/p/5002.mkv"));
+        ep.kind = "series".into();
+        let episodes = replace_episodes(&home, id_in(&home, "Show"), &[ep.clone()]).unwrap();
+        toggle_favorite(&home, id_in(&home, "Two")).unwrap();
+        set_channel_hidden(&home, id_in(&home, "Three"), true).unwrap();
+        set_group_prefs(&home, sid, "live", &["G".into()], Some(true), None).unwrap();
+        upsert_watch_progress(&home, id_in(&home, "Film"), 1200.0, 6000.0, false).unwrap();
+        upsert_watch_progress(&home, episodes[0].id, 300.0, 2400.0, false).unwrap();
+        set_lock_words(&home, &["xxx".into()]).unwrap();
+        let saved = backup::export(&home, "0.0.0", serde_json::json!({"tenvy.aspect": "\"16:9\""})).unwrap();
+        // The file holds the same thing after a round trip through JSON.
+        let saved = backup::parse(&serde_json::to_vec(&saved).unwrap()).unwrap();
+
+        // A new PC: the same provider, rows in another order (other ids);
+        // a newer password must not stop it from being recognised.
+        let away = test_db();
+        let sid2 = insert_source(&away, &SourceKind::Xtream, "Prov", url, Some("u"), Some("new")).unwrap();
+        let shifted = |id: i64, name: &str| ch(name, &format!("{url}/live/u/new/{id}.ts"));
+        replace_channels(&away, sid2, ALL_KINDS, &[film.clone(), shifted(3, "Three"), show, shifted(2, "Two"), shifted(1, "One")]).unwrap();
+        let sources = backup::match_sources(&away, &saved).unwrap();
+        assert_eq!(sources.get(&sid), Some(&sid2));
+        // The episode's show has no episodes here yet: fetch it first.
+        assert_eq!(backup::shows_to_fetch(&away, &saved, &sources).unwrap(), vec![id_in(&away, "Show")]);
+        let away_ep = replace_episodes(&away, id_in(&away, "Show"), &[ep]).unwrap()[0].id;
+
+        let mut report = backup::RestoreReport::default();
+        backup::apply(&away, &saved, &sources, &mut report).unwrap();
+        assert_eq!((report.favorites, report.hidden_channels, report.history, report.not_found), (1, 1, 2, 0));
+        assert_eq!(list_favorites(&away, true).unwrap()[0].name, "Two");
+        assert_eq!(list_hidden_channels(&away).unwrap()[0].name, "Three");
+        assert!(list_groups(&away, None, Some("live")).unwrap()[0].hidden);
+        assert_eq!(get_watch_entry(&away, away_ep).unwrap().unwrap().time_pos, 300.0);
+        assert_eq!(lock_words(&away).unwrap(), vec!["xxx".to_string()]);
+        assert_eq!(report.settings["tenvy.aspect"], "\"16:9\"");
+
+        // Restoring twice adds nothing new.
+        let mut again = backup::RestoreReport::default();
+        backup::apply(&away, &saved, &sources, &mut again).unwrap();
+        assert_eq!((again.favorites, again.hidden_channels), (0, 0));
+        assert_eq!(list_favorites(&away, true).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn parental_keywords_lock_titles_and_categories() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "t", "http://x", None, None).unwrap();
+        let mut news = ch("Nyheter 24", "http://a");
+        news.group = Some("Sverige".into());
+        let mut late = ch("Natt-TV", "http://b");
+        late.group = Some("FÖR VUXNA".into());
+        let mut film = ch("XXX Party", "http://c");
+        film.group = Some("Filmer".into());
+        replace_channels(&db, sid, ALL_KINDS, &[news, late, film]).unwrap();
+        let names = |unlocked| -> Vec<String> {
+            list_channels(&db, None, None, None, unlocked).unwrap().into_iter().map(|c| c.name).collect()
+        };
+
+        let saved = set_lock_words(&db, &[" För Vuxna ".into(), "xxx".into(), "XXX".into(), "".into()]).unwrap();
+        assert_eq!(saved, vec!["för vuxna".to_string(), "xxx".to_string()], "folded, trimmed, deduplicated");
+        // Locked: the category (beyond ASCII case) and the title are out.
+        assert_eq!(names(false), vec!["Nyheter 24".to_string()]);
+        assert_eq!(names(true).len(), 3);
+        assert_eq!(search_channels(&db, "party", None, None, false).unwrap().len(), 0);
+
+        let groups = list_groups(&db, None, None).unwrap();
+        let adults = groups.iter().find(|g| g.name == "FÖR VUXNA").unwrap();
+        assert!(adults.locked && adults.locked_by_word);
+        assert!(!groups.iter().find(|g| g.name == "Filmer").unwrap().locked);
+
+        let id = |name: &str| list_channels(&db, None, None, None, true).unwrap().into_iter().find(|c| c.name == name).unwrap().id;
+        assert!(is_locked(&db, id("XXX Party")).unwrap());
+        assert!(is_locked(&db, id("Natt-TV")).unwrap());
+        assert!(!is_locked(&db, id("Nyheter 24")).unwrap());
+
+        set_lock_words(&db, &[]).unwrap();
+        assert_eq!(names(false).len(), 3);
+    }
+
+    #[test]
+    fn epg_offset_shifts_programmes_and_reminders() {
+        let db = test_db();
+        let sid = insert_source(&db, &SourceKind::M3u, "t", "http://x", None, None).unwrap();
+        replace_channels(&db, sid, ALL_KINDS, &[ch("A", "http://a")]).unwrap();
+        let a = list_channels(&db, None, None, None, true).unwrap()[0].id;
+        let now = chrono::Utc::now().timestamp();
+        let guide = crate::sources::xmltv::Guide {
+            programmes: vec![Programme {
+                channel_tvg_id: "a".into(),
+                start: now - 600,
+                stop: now + 600,
+                title: "News".into(),
+                description: None,
+            }],
+            channel_names: vec![],
+        };
+        upsert_guide(&db, &guide).unwrap();
+        add_reminder(&db, a, now + 3600, now + 7200, "Later").unwrap();
+
+        set_epg_offset_minutes(&db, 60).unwrap();
+        assert_eq!(epg_offset_minutes(&db).unwrap(), 60);
+        // Shown an hour later: not on now, but in the next hour.
+        assert!(now_playing(&db, &["a".into()]).unwrap().is_empty());
+        let later = programmes_for_channels(&db, &["a".into()], now + 3000, now + 3001).unwrap();
+        assert_eq!(later[0].start, now - 600 + 3600);
+        assert_eq!(list_reminders(&db).unwrap()[0].start, now + 7200, "reminders move along");
+
+        set_epg_offset_minutes(&db, 0).unwrap();
+        assert_eq!(now_playing(&db, &["a".into()]).unwrap()[0].start, now - 600);
+        assert_eq!(list_reminders(&db).unwrap()[0].start, now + 3600);
     }
 
     #[test]

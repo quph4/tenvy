@@ -135,6 +135,8 @@ start('pnpm', ['tauri', 'dev'], {
   TENVY_DATA_DIR: DATA,
   TENVY_MUTE: '1',
   TENVY_CONFIG_URL: `${PROVIDER}/config.json`,
+  // Save/restore a backup here instead of asking with a file dialog.
+  TENVY_BACKUP_FILE: join(DATA, 'backup.tenvy'),
   WEBVIEW2_USER_DATA_FOLDER: join(DATA, 'webview'),
   WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${CDP_PORT}`,
 }, 'app.log')
@@ -164,7 +166,7 @@ const TEST_TIMEOUT_MS = 180_000
 const results = []
 for (const [i, test] of tests.entries()) {
   // The first test connects the provider; the rest build on it.
-  if (only && i > 0 && !test.name.toLowerCase().includes(only.toLowerCase())) continue
+  if (only && i > 0 && !only.toLowerCase().split('|').some((f) => test.name.toLowerCase().includes(f))) continue
   const t0 = Date.now()
   let ok = true
   let note = ''

@@ -7,6 +7,7 @@ import { ipc } from '../lib/ipc'
 import { openInExternalPlayer } from '../lib/externalPlayer'
 import { liveChannels, osd } from '../lib/osd'
 import { isPlayerShown } from '../lib/layout'
+import { useUpNext } from '../stores/upNext'
 import { useParental } from '../stores/parental'
 import { useUpdater } from '../stores/updater'
 import { useChannelMenu } from '../components/ChannelMenu'
@@ -80,6 +81,10 @@ export function useKeyboardShortcuts() {
       if (e.key === 'Escape') {
         if (ui.searchOpen || ui.addSourceOpen || ui.settingsOpen || ui.manageCategoriesOpen) return // those handle their own escape
         if (pb.pendingResume) return // ResumePrompt handles its own escape
+        if (useUpNext.getState().startsAt != null) {
+          useUpNext.getState().cancel()
+          return
+        }
         if (pb.mini) pb.setMini(false)
         else if (pb.fullscreen) pb.setFullscreen(false)
         else if (ui.view === 'epg') ui.setView('player')
@@ -121,6 +126,11 @@ export function useKeyboardShortcuts() {
           if (digits) {
             e.preventDefault()
             commitDigits()
+            return
+          }
+          if (useUpNext.getState().startsAt != null) {
+            e.preventDefault()
+            useUpNext.getState().playNow()
             return
           }
           // In fullscreen notices appear on the video; Enter answers the

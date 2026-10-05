@@ -81,6 +81,8 @@ export interface Group {
   hidden: boolean
   /** Behind the parental PIN. */
   locked: boolean
+  /** Locked because its name holds a parental keyword (not a toggle). */
+  lockedByWord: boolean
 }
 
 /** Xtream subscription details (Rust models::AccountInfo). */
@@ -92,6 +94,21 @@ export interface AccountInfo {
   activeConnections: number | null
   maxConnections: number | null
   createdAt: number | null
+}
+
+/** What restoring a backup brought in (Rust db::backup::RestoreReport). */
+export interface RestoreReport {
+  sourcesAdded: number
+  /** "Provider name: why", for providers that couldn't be imported. */
+  sourcesFailed: string[]
+  favorites: number
+  hiddenChannels: number
+  categories: number
+  history: number
+  /** Items the provider no longer lists. */
+  notFound: number
+  pinRestored: boolean
+  settings: unknown
 }
 
 export interface ParentalStatus {

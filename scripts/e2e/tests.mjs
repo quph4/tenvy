@@ -120,6 +120,39 @@ export const tests = [
       }),
   },
   {
+    name: 'Guide times: an hour later moves the programmes, and back',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const ipc = await t.ipc()
+        const pl = await t.pl()
+        await pl.getState().setActiveKind('live')
+        await t.until(() => pl.getState().channels.length, 'live list')
+        const ch = pl.getState().channels.find((c) => c.name === 'Test One HD')
+        const now = Math.floor(Date.now() / 1000)
+        const [before] = await t.until(() => ipc.programmesForChannels({ tvgIds: [ch.tvgId], from: now, to: now + 1 }).then((r) => r.length && r), 'a programme now')
+        ;(await t.ui()).getState().toggleSettings()
+        const select = await t.until(() => document.querySelector('select[aria-label="Guide time adjustment"]:not([disabled])'), 'guide time setting')
+        const choose = (v) => {
+          Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, String(v))
+          select.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+        try {
+          choose(60)
+          await t.until(async () => (await ipc.epgOffset()) === 60, 'saved')
+          const [moved] = await ipc.programmesForChannels({ tvgIds: [ch.tvgId], from: before.start + 3600, to: before.start + 3601 })
+          if (moved?.title !== before.title || moved.start !== before.start + 3600)
+            throw new Error(`not moved: ${JSON.stringify(moved)} vs ${JSON.stringify(before)}`)
+          choose(0)
+          await t.until(async () => (await ipc.epgOffset()) === 0, 'back to as sent')
+          const [again] = await ipc.programmesForChannels({ tvgIds: [ch.tvgId], from: now, to: now + 1 })
+          if (again?.start !== before.start) throw new Error('not back')
+        } finally {
+          await ipc.setEpgOffset(0).catch(() => {})
+          if ((await t.ui()).getState().settingsOpen) (await t.ui()).getState().toggleSettings()
+        }
+      }),
+  },
+  {
     name: 'Reminder fires a minute before start',
     run: (ctx) =>
       ctx.page(async (t) => {
@@ -189,6 +222,41 @@ export const tests = [
         const eps = await ipc.listEpisodes(show.id)
         ;(await t.pb()).getState().requestPlay(eps.find((e) => e.season === 2 && e.episode === 1))
         await t.playing('Reconnect S02E01')
+      }),
+  },
+  {
+    name: 'Series: the next episode starts by itself; Esc cancels the countdown',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const ipc = await t.ipc()
+        const pl = await t.pl()
+        const pb = await t.pb()
+        const up = (await import('/src/stores/upNext.ts')).useUpNext
+        await pl.getState().setActiveKind('series')
+        ;(await t.ui()).getState().setView('player')
+        await t.until(() => pl.getState().channels.length, 'series list')
+        const show = pl.getState().channels.find((c) => c.name === 'Reconnect')
+        const eps = await ipc.listEpisodes(show.id)
+        pb.getState().requestPlay(eps.find((e) => e.season === 1 && e.episode === 1))
+        await t.playing('Reconnect S01E01')
+        await t.until(() => up.getState().next?.name === 'Reconnect S01E02', 'next episode looked up')
+        const toEnd = async () => {
+          await ipc.mpvSeek((pb.getState().duration ?? 600) - 3)
+          await t.until(() => up.getState().startsAt, 'countdown at the end', 20000)
+        }
+        await toEnd()
+        await t.until(() => t.text().includes('Next episode in'), 'countdown on screen')
+        t.key('Escape')
+        await t.wait(300)
+        if (up.getState().startsAt) throw new Error('Esc did not cancel the countdown')
+        await t.wait(11000) // past the 10 s countdown: it stays cancelled
+        if (pb.getState().channel?.name !== 'Reconnect S01E01') throw new Error('moved on although cancelled')
+        // Watch the end again and let it run out.
+        await ipc.mpvSeek((pb.getState().duration ?? 600) - 20)
+        pb.getState().setPlaying(true)
+        await t.until(() => !pb.getState().eofReached, 'playing again after seeking back')
+        await toEnd()
+        await t.playing('Reconnect S01E02', 0.5, 25000)
       }),
   },
   {
@@ -575,6 +643,56 @@ export const tests = [
       }),
   },
   {
+    name: 'Parental keywords: a word locks matching categories and titles',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const ipc = await t.ipc()
+        const pl = await t.pl()
+        const par = (await import('/src/stores/parental.ts')).useParental
+        await pl.getState().setActiveKind('live')
+        ;(await t.ui()).getState().setView('player')
+        await pl.getState().setActiveGroup(null)
+        await t.until(() => pl.getState().channels.some((c) => c.name === 'Test Late Night'), 'live list')
+        const late = pl.getState().channels.find((c) => c.name === 'Test Late Night')
+        try {
+          await par.getState().setPin(null, '1357')
+          ;(await t.ui()).getState().toggleSettings()
+          const input = await t.until(() => document.querySelector('input[aria-label="New keyword"]'), 'keyword field')
+          t.setInput(input, 'Adults')
+          await t.wait(100)
+          input.form.requestSubmit()
+          // Changing keywords asks for the PIN.
+          const pin = await t.until(() => document.querySelector('input[inputmode="numeric"]'), 'PIN prompt')
+          t.setInput(pin, '1357')
+          await t.wait(100)
+          t.clickText('Unlock')
+          await t.until(() => par.getState().words.includes('adults'), 'keyword saved (lowercase)')
+          await t.until(() => [...document.querySelectorAll('[aria-label="Keywords"] li')].some((li) => li.textContent.includes('adults')), 'keyword listed')
+          ;(await t.ui()).getState().toggleSettings()
+
+          await par.getState().lock()
+          await t.until(() => !pl.getState().loadingChannels && !pl.getState().channels.some((c) => c.name === 'Test Late Night'), 'title left out')
+          const adults = (await ipc.listGroups(late.sourceId, 'live')).find((g) => g.name === 'For Adults')
+          if (!adults?.locked || !adults.lockedByWord) throw new Error(`category not locked by the word: ${JSON.stringify(adults)}`)
+          if ((await ipc.searchChannels('Late')).length) throw new Error('found by search while locked')
+          if (!(await ipc.isChannelLocked(late.id))) throw new Error('playable while locked')
+          if (await ipc.isChannelLocked(pl.getState().channels.find((c) => c.name === 'Test One HD').id)) throw new Error('an unrelated channel is locked')
+
+          await ipc.parentalUnlock('1357')
+          await par.getState().refresh()
+          await pl.getState().hydrate()
+          await t.until(() => pl.getState().channels.some((c) => c.name === 'Test Late Night'), 'back with the PIN')
+        } finally {
+          await ipc.parentalUnlock('1357').catch(() => {})
+          await ipc.setParentalWords([]).catch(() => {})
+          await par.getState().setPin('1357', null).catch(() => {})
+          await par.getState().loadWords().catch(() => {})
+          if ((await t.ui()).getState().settingsOpen) (await t.ui()).getState().toggleSettings()
+          await pl.getState().hydrate()
+        }
+      }),
+  },
+  {
     name: 'Provider: rename and refresh keep favorites',
     run: (ctx) =>
       ctx.page(async (t) => {
@@ -636,6 +754,67 @@ export const tests = [
         await pl.getState().hydrate()
         if ((await ipc.listSources()).length !== 1) throw new Error('second provider not removed')
         void now
+      }, `${PROVIDER}/playlist.m3u`),
+  },
+  {
+    name: 'Backup: save, lose things, restore them (with a removed provider)',
+    run: (ctx) =>
+      ctx.page(async (t, url) => {
+        const ipc = await t.ipc()
+        const pl = await t.pl()
+        const ui = async () => (await t.ui()).getState()
+        await pl.getState().setActiveKind('live')
+        await t.until(() => pl.getState().channels.length, 'live list')
+        const kids = pl.getState().channels.find((c) => c.name === 'Test Kids')
+        const weather = pl.getState().channels.find((c) => c.name === 'Test Weather')
+        const isFav = async () => (await ipc.listFavorites()).some((c) => c.id === kids.id)
+        const isHidden = async () => (await ipc.listHiddenChannels()).some((c) => c.id === weather.id)
+        const extra = async () => (await ipc.listSources()).find((s) => s.name === 'M3U backup')
+        const wasFav = await isFav()
+        try {
+          await ipc.addSource({ kind: 'm3u', name: 'M3U backup', url })
+          if (!wasFav) await ipc.toggleFavorite(kids.id)
+          await ipc.setChannelHidden(weather.id, true)
+          await pl.getState().hydrate()
+
+          ;(await ui()).toggleSettings()
+          await t.until(() => [...document.querySelectorAll('button')].some((b) => b.textContent.includes('Save a backup')), 'backup section')
+          // Settings scroll: the last section can be reached on any screen.
+          const panel = [...document.querySelectorAll('aside')].find((a) => a.textContent.includes('Save a backup'))
+          const scroller = panel.querySelector('.overflow-y-auto')
+          scroller.scrollTop = scroller.scrollHeight
+          await t.wait(100)
+          const last = [...panel.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Copy diagnostics')
+          if (!last || last.getBoundingClientRect().bottom > innerHeight) throw new Error("Settings don't scroll to the end")
+          t.clickText('Save a backup…')
+          await t.until(() => t.text().includes('Saved to'), 'saved')
+
+          // Lose them.
+          await ipc.toggleFavorite(kids.id)
+          await ipc.setChannelHidden(weather.id, false)
+          await ipc.removeSource((await extra()).id)
+          await pl.getState().hydrate()
+          if ((await isFav()) || (await isHidden()) || (await extra())) throw new Error('not undone')
+
+          t.clickText('Restore from a backup…')
+          await t.until(() => t.text().includes('Restored'), 'restored', 60000)
+          const note = t.text()
+          if (!note.includes('1 provider added')) throw new Error(`provider not re-added: ${note.slice(note.indexOf('Restored'), note.indexOf('Restored') + 160)}`)
+          if (!(await isFav())) throw new Error('favorite not back')
+          if (!(await isHidden())) throw new Error('hidden channel not back')
+          const back = await extra()
+          if (!back) throw new Error('provider not back')
+          if (!(await ipc.sourceStats(back.id)).live) throw new Error('re-added provider has no channels')
+          if (!pl.getState().sources.some((s) => s.id === back.id)) throw new Error('sidebar not refreshed')
+        } finally {
+          const left = await extra()
+          if (left) await ipc.removeSource(left.id).catch(() => {})
+          if ((await isFav()) !== wasFav) await ipc.toggleFavorite(kids.id).catch(() => {})
+          await ipc.setChannelHidden(weather.id, false).catch(() => {})
+          if ((await ui()).settingsOpen) (await ui()).toggleSettings()
+          await pl.getState().setActiveSource(pl.getState().sources[0].id)
+          await pl.getState().hydrate()
+        }
       }, `${PROVIDER}/playlist.m3u`),
   },
   {

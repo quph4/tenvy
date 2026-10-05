@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["full"] }
 
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip"] }
 
-rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
+rusqlite = { version = "0.32", features = ["bundled", "chrono", "functions"] }
 
 quick-xml = { version = "0.36", features = ["serialize"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
@@ -38,6 +38,7 @@ tracing-appender = "0.2"
 url = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
 chrono-tz = "0.10"
 tauri-plugin-notification = "2"
 sha2 = "0.10"

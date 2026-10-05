@@ -21,6 +21,11 @@ interface ParentalState {
   cancel(): void
   lock(): Promise<void>
   setPin(current: string | null, next: string | null): Promise<void>
+  /** Parental keywords (stored lowercase). */
+  words: string[]
+  loadWords(): Promise<void>
+  /** Replace the keywords; asks for the PIN first when it's needed. */
+  setWords(words: string[]): Promise<boolean>
 }
 
 let waiting: ((ok: boolean) => void) | null = null
@@ -33,6 +38,7 @@ function reloadLists() {
 export const useParental = create<ParentalState>((set, get) => ({
   status: { pinSet: false, unlocked: true },
   prompt: null,
+  words: [],
 
   async refresh() {
     set({ status: await ipc.parentalStatus() })
@@ -79,5 +85,16 @@ export const useParental = create<ParentalState>((set, get) => ({
     await ipc.setParentalPin(current, next)
     await get().refresh()
     reloadLists()
+  },
+
+  async loadWords() {
+    set({ words: await ipc.parentalWords() })
+  },
+
+  async setWords(words) {
+    if (!(await get().requireUnlocked('Enter the PIN to change the keywords.'))) return false
+    set({ words: await ipc.setParentalWords(words) })
+    reloadLists()
+    return true
   },
 }))

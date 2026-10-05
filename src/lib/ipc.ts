@@ -13,6 +13,7 @@ import type {
   Programme,
   Source,
   Reminder,
+  RestoreReport,
   SourceKind,
   SourceStats,
   TrackPrefs,
@@ -105,6 +106,14 @@ export const ipc = {
   async setParentalPin(current: string | null, next: string | null): Promise<void> {
     return invoke('set_parental_pin', { current, new: next })
   },
+  /** Words that lock any category or title whose name holds them. */
+  async parentalWords(): Promise<string[]> {
+    return invoke('parental_words')
+  },
+  /** Replace them (needs the PIN entered); returns them as stored. */
+  async setParentalWords(words: string[]): Promise<string[]> {
+    return invoke('set_parental_words', { words })
+  },
   async recentlyAdded(kind: 'movie' | 'series', limit = 20): Promise<Channel[]> {
     return invoke('recently_added', { kind, limit })
   },
@@ -182,6 +191,22 @@ export const ipc = {
     to: number
   }): Promise<Programme[]> {
     return invoke('programmes_for_channels', args)
+  },
+  /** Save a backup where the viewer picks; the path, or null if cancelled.
+   *  `settings`: the webview's preferences that travel with it. */
+  async exportBackup(settings: Record<string, string>): Promise<string | null> {
+    return invoke('export_backup', { settings })
+  },
+  /** Restore a backup the viewer picks; null if cancelled. */
+  async restoreBackup(): Promise<RestoreReport | null> {
+    return invoke('restore_backup')
+  },
+  /** Minutes added to every guide time (a guide that runs off). */
+  async epgOffset(): Promise<number> {
+    return invoke('epg_offset')
+  },
+  async setEpgOffset(minutes: number): Promise<void> {
+    return invoke('set_epg_offset', { minutes })
   },
   /** What's on now for each guide id (at most one programme per id). */
   async nowPlaying(tvgIds: string[]): Promise<Programme[]> {

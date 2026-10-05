@@ -1,5 +1,5 @@
-import { Lock, LockOpen, SlidersHorizontal } from 'lucide-react'
-import { useState } from 'react'
+import { Lock, LockOpen, SlidersHorizontal, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useParental } from '../../stores/parental'
 import { useUI } from '../../stores/ui'
 import { PinInput } from '../PinPrompt'
@@ -49,6 +49,91 @@ export function ParentalSection() {
           {status.pinSet && status.unlocked && <SmallButton onClick={() => lock().catch(() => {})}>Lock now</SmallButton>}
         </div>
       )}
+
+      {status.pinSet && <LockWords />}
+    </div>
+  )
+}
+
+/** Common words for adult content, offered in one click. */
+const ADULT_WORDS = ['adult', 'xxx', '18+', 'porn', 'for adults', 'vuxen', 'vuxna']
+
+/**
+ * Keywords: any category or title whose name holds one is locked like a
+ * locked category — also ones the provider adds later.
+ */
+function LockWords() {
+  const words = useParental((s) => s.words)
+  const loadWords = useParental((s) => s.loadWords)
+  const setWords = useParental((s) => s.setWords)
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    loadWords().catch(() => {})
+  }, [loadWords])
+
+  const save = async (next: string[]) => {
+    try {
+      setError(null)
+      return await setWords(next)
+    } catch (e) {
+      setError(String(e).replace(/^Error:\s*/, ''))
+      return false
+    }
+  }
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const w = draft.trim()
+    if (w && (await save([...words, w]))) setDraft('')
+  }
+  const missing = ADULT_WORDS.filter((w) => !words.includes(w))
+
+  return (
+    <div className="mt-5">
+      <div className="text-sm text-neutral-200">Lock by keyword</div>
+      <div className="text-[11px] text-neutral-500">
+        Categories, channels and titles whose name contains a keyword need the PIN — new ones from the provider too.
+      </div>
+      {words.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Keywords">
+          {words.map((w) => (
+            <li key={w} className="inline-flex h-6 items-center gap-1 rounded-full border border-neutral-800 bg-neutral-950/60 pl-2.5 pr-1 text-xs text-neutral-200">
+              {w}
+              <button
+                onClick={() => save(words.filter((x) => x !== w))}
+                aria-label={`Remove ${w}`}
+                title="Remove"
+                className="grid h-4 w-4 place-items-center rounded-full text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={add} className="mt-2 flex gap-2">
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a keyword, e.g. xxx"
+          aria-label="New keyword"
+          maxLength={40}
+          className="h-8 min-w-0 flex-1 rounded-md border border-neutral-800 bg-neutral-950 px-2.5 text-xs text-neutral-200 outline-none placeholder:text-neutral-600 focus:border-accent-400/60"
+        />
+        <button
+          type="submit"
+          disabled={!draft.trim()}
+          className="h-8 shrink-0 rounded-md border border-neutral-800 px-3 text-xs text-neutral-300 hover:border-neutral-700 disabled:opacity-50"
+        >
+          Add
+        </button>
+      </form>
+      {missing.length > 0 && (
+        <button onClick={() => save([...words, ...missing])} className="mt-2 text-[11px] text-accent-400 hover:text-accent-300">
+          Add common adult words ({missing.join(', ')})
+        </button>
+      )}
+      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
     </div>
   )
 }

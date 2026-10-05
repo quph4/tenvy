@@ -191,7 +191,8 @@ function Dialog() {
                   <IconToggle
                     on={g.locked}
                     accent
-                    label={g.locked ? 'Unlock' : 'Lock'}
+                    disabled={g.lockedByWord}
+                    label={g.lockedByWord ? 'Locked by a keyword (Settings → parental lock)' : g.locked ? 'Unlock' : 'Lock'}
                     onClick={() => apply([g.name], { locked: !g.locked })}
                   >
                     {g.locked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
@@ -257,12 +258,14 @@ function Bulk({ children, onClick, accent }: { children: React.ReactNode; onClic
 function IconToggle({
   on,
   accent,
+  disabled,
   label,
   onClick,
   children,
 }: {
   on: boolean
   accent?: boolean
+  disabled?: boolean
   label: string
   onClick(): void
   children: React.ReactNode
@@ -270,10 +273,11 @@ function IconToggle({
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       title={label}
       aria-label={label}
       className={cn(
-        'grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-neutral-800',
+        'grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors hover:bg-neutral-800 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent',
         on ? (accent ? 'text-accent-400' : 'text-neutral-300') : 'text-neutral-600',
       )}
     >

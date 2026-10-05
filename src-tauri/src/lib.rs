@@ -60,6 +60,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // Development builds can run against a separate data folder
@@ -113,6 +114,12 @@ pub fn run() {
             commands::list_hidden_channels,
             commands::programmes_for_channels,
             commands::now_playing,
+            commands::epg_offset,
+            commands::export_backup,
+            commands::restore_backup,
+            commands::parental_words,
+            commands::set_parental_words,
+            commands::set_epg_offset,
             commands::open_external,
             commands::record_history,
             commands::list_history,

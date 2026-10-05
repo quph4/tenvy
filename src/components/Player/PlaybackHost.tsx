@@ -9,6 +9,8 @@ import { osd, showChannelInfo } from '../../lib/osd'
 import { usePlaylist } from '../../stores/playlist'
 import { daysLeft, useAccounts } from '../../stores/accounts'
 import { applyAspect, savedAspect } from '../../lib/picture'
+// Next-episode countdown: it follows the playback store from here on.
+import '../../stores/upNext'
 
 /*
  * Playback that doesn't depend on the player being on screen: opening what

@@ -6,6 +6,7 @@ import { usePlayback } from '../../stores/playback'
 import { Controls, type PickerKind } from './Controls'
 import { TrackPanel, formatTrack, type TrackOption } from './TrackPanel'
 import { PicturePanel } from './PicturePanel'
+import { UpNext } from './UpNext'
 import type { Programme } from '../../types'
 import { ipc } from '../../lib/ipc'
 import { useToast } from '../../stores/toast'
@@ -185,6 +186,7 @@ export function Player() {
                 className="relative flex-1 bg-black"
                 aria-label="Video"
               />
+              {!fullscreen && <UpNext />}
               {!fullscreen && (
                 <Controls
                   onToggleFullscreen={toggleFullscreen}

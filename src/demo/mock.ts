@@ -285,7 +285,7 @@ const visible = (c: Channel, skipHidden: boolean) => {
 function groups({ kind }: Args) {
   const counts = new Map<string, number>()
   for (const c of channels) if (!kind || c.kind === kind) counts.set(c.group!, (counts.get(c.group!) ?? 0) + 1)
-  return [...counts].map(([name, count]) => ({ name, count, ...(groupPrefs.get(`${kind}/${name}`) ?? { hidden: false, locked: false }) }))
+  return [...counts].map(([name, count]) => ({ name, count, ...(groupPrefs.get(`${kind}/${name}`) ?? { hidden: false, locked: false }), lockedByWord: false }))
 }
 
 function handle(cmd: string, a: Args = {}): unknown {
@@ -396,6 +396,17 @@ function handle(cmd: string, a: Args = {}): unknown {
         const cur = groupPrefs.get(key) ?? { hidden: false, locked: false }
         groupPrefs.set(key, { hidden: a.hidden ?? cur.hidden, locked: a.locked ?? cur.locked })
       }
+      return null
+    case 'parental_words':
+      return []
+    case 'set_parental_words':
+      return a.words
+    case 'epg_offset':
+      return 0
+    case 'set_epg_offset':
+      return null
+    case 'export_backup':
+    case 'restore_backup':
       return null
     case 'get_channel':
       return byId.get(a.id) ?? null

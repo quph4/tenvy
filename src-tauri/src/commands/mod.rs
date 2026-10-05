@@ -564,6 +564,12 @@ pub async fn search_channels(
 /// history — stay stable; falls back to the stored list when offline.
 #[tauri::command]
 pub async fn list_episodes(state: State<'_, AppState>, channel_id: i64) -> Result<Vec<Channel>> {
+    fetch_episodes(&state, channel_id).await
+}
+
+/// A show's episodes, fresh from the provider (stored), or the stored ones
+/// when the provider can't be reached.
+async fn fetch_episodes(state: &AppState, channel_id: i64) -> Result<Vec<Channel>> {
     let db = state.db.clone();
     let show = tokio::task::spawn_blocking(move || db::get_channel(&db, channel_id))
         .await??
@@ -626,6 +632,28 @@ pub async fn set_group_prefs(
     }
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || db::set_group_prefs(&db, source_id, &kind, &names, hidden, locked)).await?
+}
+
+/// Parental keywords: any category or title whose name holds one is
+/// locked like a locked category.
+#[tauri::command]
+pub async fn parental_words(state: State<'_, AppState>) -> Result<Vec<String>> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::lock_words(&db)).await?
+}
+
+/// Replace the parental keywords; needs a PIN, entered.
+#[tauri::command]
+pub async fn set_parental_words(state: State<'_, AppState>, words: Vec<String>) -> Result<Vec<String>> {
+    let status = state.parental.status();
+    if !status.pin_set {
+        return Err(err!("Set a parental PIN first."));
+    }
+    if !status.unlocked {
+        return Err(err!("Enter the parental PIN first."));
+    }
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::set_lock_words(&db, &words)).await?
 }
 
 #[tauri::command]
@@ -798,6 +826,136 @@ pub async fn programmes_for_channels(
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || db::programmes_for_channels(&db, &tvg_ids, from, to))
         .await?
+}
+
+// ---------- backup ----------
+
+/// Where to save or read a backup: the system file dialog. (Debug builds
+/// take TENVY_BACKUP_FILE instead, for the end-to-end tests.)
+async fn pick_backup_file(app: &AppHandle, save: bool) -> Option<std::path::PathBuf> {
+    #[cfg(debug_assertions)]
+    if let Some(p) = std::env::var_os("TENVY_BACKUP_FILE") {
+        return Some(p.into());
+    }
+    use tauri_plugin_dialog::DialogExt;
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let dialog = app.dialog().file().add_filter("Tenvy backup", &["tenvy", "json"]);
+        if save {
+            let name = format!("Tenvy backup {}.tenvy", chrono::Local::now().format("%Y-%m-%d"));
+            dialog.set_file_name(name).blocking_save_file()
+        } else {
+            dialog.blocking_pick_file()
+        }
+    })
+    .await
+    .ok()
+    .flatten()
+    .and_then(|f| f.into_path().ok())
+}
+
+/// Save everything set up here to a file the viewer picks. `settings` are
+/// the webview's own preferences, passed through. None if cancelled.
+#[tauri::command]
+pub async fn export_backup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    settings: serde_json::Value,
+) -> Result<Option<String>> {
+    let Some(path) = pick_backup_file(&app, true).await else { return Ok(None) };
+    let db = state.db.clone();
+    let json = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+        let backup = db::backup::export(&db, env!("CARGO_PKG_VERSION"), settings)?;
+        serde_json::to_vec_pretty(&backup).map_err(|e| err!("Couldn't write the backup: {e}"))
+    })
+    .await??;
+    tokio::fs::write(&path, json).await?;
+    tracing::info!(target: "tenvy_lib", "backup saved");
+    Ok(Some(path.display().to_string()))
+}
+
+/// Read a backup the viewer picks: add and import the providers that are
+/// missing, then bring in favorites, progress and the rest. None if
+/// cancelled.
+#[tauri::command]
+pub async fn restore_backup(app: AppHandle, state: State<'_, AppState>) -> Result<Option<db::backup::RestoreReport>> {
+    let Some(path) = pick_backup_file(&app, false).await else { return Ok(None) };
+    if tokio::fs::metadata(&path).await?.len() > 64 * 1024 * 1024 {
+        return Err(err!("That file is too big to be a Tenvy backup."));
+    }
+    let bytes = tokio::fs::read(&path).await?;
+    let backup = std::sync::Arc::new(db::backup::parse(&bytes)?);
+    let mut report = db::backup::RestoreReport::default();
+
+    let (db, b) = (state.db.clone(), backup.clone());
+    let mut sources = tokio::task::spawn_blocking(move || db::backup::match_sources(&db, &b)).await??;
+    let missing: Vec<_> = backup.sources.iter().filter(|s| !sources.contains_key(&s.r#ref)).cloned().collect();
+    for s in &missing {
+        let Some(kind) = SourceKind::from_str(&s.kind) else {
+            report.sources_failed.push(format!("{}: unknown kind of playlist", s.name));
+            continue;
+        };
+        let db = state.db.clone();
+        let s2 = s.clone();
+        let id = tokio::task::spawn_blocking(move || {
+            db::insert_source(&db, &kind, &s2.name, &s2.url, s2.username.as_deref(), s2.password.as_deref())
+        })
+        .await??;
+        match ingest(&app, &state, id).await {
+            Ok(()) => {
+                sources.insert(s.r#ref, id);
+                report.sources_added += 1;
+            }
+            Err(e) => {
+                let db = state.db.clone();
+                let _ = tokio::task::spawn_blocking(move || db::delete_source(&db, id)).await;
+                report.sources_failed.push(format!("{}: {}", s.name, e));
+            }
+        }
+    }
+
+    // Episodes come per show from the provider; fetch the shows with
+    // progress or favorites in the backup (best effort).
+    let (db, b, m) = (state.db.clone(), backup.clone(), sources.clone());
+    let shows = tokio::task::spawn_blocking(move || db::backup::shows_to_fetch(&db, &b, &m)).await??;
+    for show in shows.into_iter().take(200) {
+        if let Err(e) = fetch_episodes(&state, show).await {
+            tracing::warn!(target: "tenvy_lib", "restore: episodes of {} unavailable: {}", show, e);
+        }
+    }
+
+    let (db, b) = (state.db.clone(), backup.clone());
+    report = tokio::task::spawn_blocking(move || {
+        db::backup::apply(&db, &b, &sources, &mut report)?;
+        Ok::<_, crate::error::Error>(report)
+    })
+    .await??;
+    if let Some(pin) = backup.parental_pin.as_deref() {
+        report.pin_restored = state.parental.adopt(&state.db, pin)?;
+    }
+    tracing::info!(
+        target: "tenvy_lib",
+        "backup restored: {} providers added, {} failed, {} favorites, {} in history, {} not found",
+        report.sources_added, report.sources_failed.len(), report.favorites, report.history, report.not_found
+    );
+    Ok(Some(report))
+}
+
+/// Minutes added to every guide time (Settings → Guide).
+#[tauri::command]
+pub async fn epg_offset(state: State<'_, AppState>) -> Result<i64> {
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::epg_offset_minutes(&db)).await?
+}
+
+#[tauri::command]
+pub async fn set_epg_offset(app: AppHandle, state: State<'_, AppState>, minutes: i64) -> Result<()> {
+    let minutes = minutes.clamp(-12 * 60, 12 * 60);
+    let db = state.db.clone();
+    tokio::task::spawn_blocking(move || db::set_epg_offset_minutes(&db, minutes)).await??;
+    // Everything showing guide times reloads.
+    let _ = app.emit("guide-updated", 0);
+    Ok(())
 }
 
 /// What's on now for a batch of guide ids — one call per screen of rows.

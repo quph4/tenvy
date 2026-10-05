@@ -68,7 +68,7 @@ hidden and locked categories, a second (M3U) provider, start with the
 last channel, an mpv crash, starting offline, and dropped/stalled
 streams. After every test it also checks that the app agrees with itself
 (categories match the tab, lists hold the right content). Run it before
-each release. `pnpm e2e Guide` runs only matching tests (plus setup);
+each release. `pnpm e2e Guide` runs only matching tests (plus setup; `"Guide|Film"` for several);
 results and screenshots of failures land in `scripts/e2e/out/`.
 
 ### Demo video

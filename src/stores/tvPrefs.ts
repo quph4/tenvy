@@ -11,6 +11,8 @@ interface TvPrefsState {
   startWithLastChannel: boolean
   /** Re-import providers not updated for a day, in the background. */
   dailyRefresh: boolean
+  /** When an episode ends, count down to the next one. */
+  autoNext: boolean
   /** The user picked an audio track; remember its language. */
   pickedAudio(track: MpvTrack | undefined): void
   /** The user picked a subtitle track, or turned subtitles off (undefined). */
@@ -18,12 +20,14 @@ interface TvPrefsState {
   resetTracks(): void
   setStartWithLastChannel(on: boolean): void
   setDailyRefresh(on: boolean): void
+  setAutoNext(on: boolean): void
 }
 
 const TRACKS_KEY = 'tenvy.trackPrefs'
 const START_KEY = 'tenvy.startWithLastChannel'
 const REFRESH_KEY = 'tenvy.dailyRefresh'
 const LAST_KEY = 'tenvy.lastChannelId'
+const AUTO_NEXT_KEY = 'tenvy.autoNext'
 
 const NO_PREFS: TrackPrefs = { audioLang: null, subLang: null, subsOff: false }
 
@@ -48,6 +52,7 @@ export const useTvPrefs = create<TvPrefsState>((set, get) => ({
   tracks: read(TRACKS_KEY, NO_PREFS),
   startWithLastChannel: read<{ on: boolean }>(START_KEY, { on: false }).on,
   dailyRefresh: read<{ on: boolean }>(REFRESH_KEY, { on: true }).on,
+  autoNext: read<{ on: boolean }>(AUTO_NEXT_KEY, { on: true }).on,
 
   pickedAudio(track) {
     if (!track?.lang) return
@@ -70,11 +75,25 @@ export const useTvPrefs = create<TvPrefsState>((set, get) => ({
     set({ dailyRefresh: on })
     write(REFRESH_KEY, { on })
   },
+  setAutoNext(on) {
+    set({ autoNext: on })
+    write(AUTO_NEXT_KEY, { on })
+  },
   setStartWithLastChannel(on) {
     set({ startWithLastChannel: on })
     write(START_KEY, { on })
   },
 }))
+
+/** Re-read the preferences from storage (after a backup is restored). */
+export function reloadTvPrefs() {
+  useTvPrefs.setState({
+    tracks: read(TRACKS_KEY, NO_PREFS),
+    startWithLastChannel: read<{ on: boolean }>(START_KEY, { on: false }).on,
+    dailyRefresh: read<{ on: boolean }>(REFRESH_KEY, { on: true }).on,
+    autoNext: read<{ on: boolean }>(AUTO_NEXT_KEY, { on: true }).on,
+  })
+}
 
 /** Remember the live channel now playing, for "start with last channel". */
 export function rememberLastChannel(ch: Channel) {

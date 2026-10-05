@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The next episode starts by itself: when an episode ends, a 10-second
+  countdown shows (on the video too), with Play now and Cancel (Enter /
+  Esc). Off under Settings → Playback.
+- Guide times can be moved earlier or later (Settings → Guide), for
+  guides that run an hour off. Reminders move along.
+- Lock by keyword (Settings → parental lock): any category, channel or
+  title whose name contains a word like "xxx" needs the PIN — including
+  ones the provider adds later. "Add common adult words" in one click.
+- Backup: save providers, favorites, hidden channels and categories, what
+  you've watched, the parental lock and your settings to one file, and
+  restore it on another PC (Settings → Backup). Missing providers are
+  added and imported; nothing already there is removed.
+
+### Fixed
+- Settings scroll: the lower sections (About, Check for updates) could be
+  out of reach on smaller screens.
+
 ## 0.1.2 — 2026-10-04
 
 ### Added
