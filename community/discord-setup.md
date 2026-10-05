@@ -2,15 +2,11 @@
 
 Texterna att klistra in är på engelska (serverns språk). Stegen är på svenska.
 
-## 1. Inbjudan som aldrig går ut
+## 1. Inbjudan
 
-Länken `discord.gg/bXYCSw2ws` slutar fungera **4 november 2026**. Gör en
-permanent:
-
-1. Högerklicka på servern → **Invite People** → **Edit invite link**.
-2. **Expire after: Never**, **Max number of uses: No limit** → **Generate a New Link**.
-3. Skicka den nya länken till Claude — den byts i `config.json` på en minut
-   (appen och webbplatsen följer med, ingen ny version behövs).
+Permanent inbjudan: **https://discord.gg/WxShS8pgzR** (går aldrig ut). Den
+ligger i `config.json` på webbplatsen — appen och webbplatsen läser den
+därifrån, så en ny länk kräver ingen ny version.
 
 ## 2. Kanaler
 
