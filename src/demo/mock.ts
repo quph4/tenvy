@@ -417,6 +417,7 @@ function handle(cmd: string, a: Args = {}): unknown {
           model: 'free',
           support: { url: 'https://example.com', label: 'Support Tenvy', message: null },
           supportPrompt: null,
+          community: null,
           announcements: [],
         },
       }

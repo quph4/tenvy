@@ -40,11 +40,18 @@ export const tests = [
       }),
   },
   {
-    name: 'Remote config: announcement and support link',
+    name: 'Remote config: announcement, support and community links',
     run: (ctx) =>
       ctx.page(async (t) => {
         await t.until(() => t.toasts.some((m) => m.includes('Hello from the test provider')), 'announcement', 20000)
         await t.until(() => [...document.querySelectorAll('footer button')].some((b) => b.textContent.includes('Support Tenvy')), 'support link in footer')
+        await t.until(() => [...document.querySelectorAll('footer button')].some((b) => b.textContent.includes('Discord')), 'community link in footer')
+        ;(await t.ui()).getState().toggleSettings()
+        try {
+          await t.until(() => [...document.querySelectorAll('aside button')].some((b) => b.textContent.startsWith('Discord') && b.textContent.includes('Questions')), 'community in About')
+        } finally {
+          ;(await t.ui()).getState().toggleSettings()
+        }
       }),
   },
   {

@@ -33,6 +33,12 @@ export function openSupportLink() {
   if (url?.startsWith('https://')) openUrl(url).catch(() => {})
 }
 
+/** Open the community (Discord) link from the config. */
+export function openCommunityLink() {
+  const url = useAppInfo.getState().info?.config.community?.url
+  if (url?.startsWith('https://')) openUrl(url).catch(() => {})
+}
+
 const DAY = 86_400
 const RELOAD_MS = 12 * 60 * 60 * 1000
 /** Settle in before showing anything. */

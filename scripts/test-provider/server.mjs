@@ -377,6 +377,7 @@ createServer((req, res) => {
       model: 'free',
       support: { url: 'https://example.org/support-tenvy', label: 'Support Tenvy', message: 'Test prompt from the test provider.' },
       supportPrompt: { afterDays: 0, everyDays: 1 },
+      community: { url: 'https://example.org/tenvy-community', label: 'Discord' },
       announcements: [{ id: `e2e-${T0}`, text: 'Hello from the test provider.', url: null }],
     })
   }

@@ -185,6 +185,8 @@ export interface RemoteConfig {
   model: string
   support: { url: string; label: string | null; message: string | null } | null
   supportPrompt: { afterDays: number; everyDays: number } | null
+  /** Where people talk, ask and report (the Discord). */
+  community: { url: string; label: string | null } | null
   announcements: { id: string; text: string; url: string | null }[]
 }
 

@@ -26,6 +26,8 @@ pub struct RemoteConfig {
     pub support: Option<SupportLink>,
     /// When to gently ask for support. No prompt when absent.
     pub support_prompt: Option<SupportPrompt>,
+    /// Where people talk, ask and report (the Discord). Hidden when absent.
+    pub community: Option<CommunityLink>,
     /// One-off messages, each shown once per install.
     pub announcements: Vec<Announcement>,
 }
@@ -39,6 +41,14 @@ pub struct SupportLink {
     /// The sentence in the occasional prompt.
     #[serde(default)]
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommunityLink {
+    pub url: String,
+    #[serde(default)]
+    pub label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -78,6 +88,10 @@ impl RemoteConfig {
             s
         });
         self.support_prompt = self.support_prompt.filter(|p| p.every_days > 0);
+        self.community = self.community.filter(|c| is_https(&c.url)).map(|mut c| {
+            c.label = c.label.map(|t| clip(&t)).filter(|t| !t.is_empty());
+            c
+        });
         self.announcements = self
             .announcements
             .into_iter()
@@ -159,6 +173,9 @@ mod tests {
             serde_json::from_str(r#"{"model":"free","futureField":1,"support":{"url":"https://ko-fi.com/x"}}"#)
                 .unwrap();
         assert_eq!(c.support.unwrap().url, "https://ko-fi.com/x");
+        let c: RemoteConfig =
+            serde_json::from_str(r#"{"community":{"url":"https://discord.gg/abc","label":"Join the Discord"}}"#).unwrap();
+        assert_eq!(c.sanitized("0.1.0").community.unwrap().label.as_deref(), Some("Join the Discord"));
     }
 
     #[test]
@@ -183,6 +200,12 @@ mod tests {
         .sanitized("0.1.0");
         assert!(c.support.is_none());
         assert!(c.announcements.is_empty());
+        let c = RemoteConfig {
+            community: Some(CommunityLink { url: "http://discord.gg/x".into(), label: None }),
+            ..Default::default()
+        }
+        .sanitized("0.1.0");
+        assert!(c.community.is_none());
     }
 
     #[test]

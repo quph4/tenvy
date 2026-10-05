@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- A link to the Tenvy community on Discord, in the bottom bar and under
+  Settings → About — for questions, ideas and problems.
+
 ## 0.1.3 — 2026-10-05
 
 ### Added

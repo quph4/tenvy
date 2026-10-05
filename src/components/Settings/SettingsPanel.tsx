@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bell, Download, Heart, Pencil, Plus, RefreshCcw, Trash2, Upload, X } from 'lucide-react'
+import { Bell, Download, Heart, MessagesSquare, Pencil, Plus, RefreshCcw, Trash2, Upload, X } from 'lucide-react'
 import { useUI } from '../../stores/ui'
 import { usePlayback } from '../../stores/playback'
 import { usePlaylist } from '../../stores/playlist'
@@ -9,7 +9,7 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { useToast } from '../../stores/toast'
 import { useUpdater } from '../../stores/updater'
 import { useReminders } from '../../stores/reminders'
-import { openSupportLink, useAppInfo } from '../../stores/appInfo'
+import { openCommunityLink, openSupportLink, useAppInfo } from '../../stores/appInfo'
 import { languageName, useTvPrefs } from '../../stores/tvPrefs'
 import { UP_NEXT_SECONDS } from '../../stores/upNext'
 import { daysLeft, expiryLabel, useAccounts } from '../../stores/accounts'
@@ -172,6 +172,7 @@ function AboutSection() {
   const checkForUpdates = useUpdater((s) => s.checkForUpdates)
   const install = useUpdater((s) => s.install)
   const support = useAppInfo((s) => s.info?.config.support ?? null)
+  const community = useAppInfo((s) => s.info?.config.community ?? null)
 
   const line =
     status.kind === 'checking'
@@ -211,6 +212,18 @@ function AboutSection() {
           </button>
         )}
       </div>
+      {community && (
+        <button
+          onClick={openCommunityLink}
+          className="mt-3 flex w-full items-center gap-3 rounded-md border border-neutral-800 bg-neutral-950/60 px-3 py-2.5 text-left hover:border-neutral-700"
+        >
+          <MessagesSquare className="h-4 w-4 shrink-0 text-accent-400" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm text-neutral-200">{community.label ?? 'Join the community'}</span>
+            <span className="block text-[11px] text-neutral-500">Questions, ideas or something not working? Ask there — news about updates, too.</span>
+          </span>
+        </button>
+      )}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           onClick={() => openUrl(REPORT_URL).catch(() => {})}

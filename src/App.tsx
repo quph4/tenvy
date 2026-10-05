@@ -30,13 +30,13 @@ import { attachIngestListener } from './stores/ingest'
 import { attachGuideListener } from './stores/nowPlaying'
 import { startUpdateChecks } from './stores/updater'
 import { startReminderScheduler } from './stores/reminders'
-import { openSupportLink, startAppInfo, useAppInfo } from './stores/appInfo'
+import { openCommunityLink, openSupportLink, startAppInfo, useAppInfo } from './stores/appInfo'
 import { useKeyboardShortcuts } from './hooks/useKeyboard'
 import { ipc, subscribe } from './lib/ipc'
 import { startToastMirror } from './lib/osd'
 import { startAutoRefresh } from './stores/autoRefresh'
 import { lastChannelId, useTvPrefs } from './stores/tvPrefs'
-import { Heart } from 'lucide-react'
+import { Heart, MessagesSquare } from 'lucide-react'
 import { cn } from './lib/cn'
 
 function App() {
@@ -94,6 +94,7 @@ function App() {
   useEffect(() => startToastMirror(), [])
   useEffect(() => startAutoRefresh(), [])
   const support = useAppInfo((s) => s.info?.config.support ?? null)
+  const community = useAppInfo((s) => s.info?.config.community ?? null)
 
   // Nothing plays out of sight unannounced: whenever something plays and
   // the player isn't on screen (Home, the guide, the library), the Now
@@ -169,10 +170,19 @@ function App() {
           <span className="kbd mr-1">0–9</span>
           Channel
         </span>
+        {community && (
+          <button
+            onClick={openCommunityLink}
+            className="ml-auto inline-flex items-center gap-1 text-neutral-500 transition-colors hover:text-neutral-200"
+          >
+            <MessagesSquare className="h-3 w-3" />
+            {community.label ?? 'Community'}
+          </button>
+        )}
         {support && (
           <button
             onClick={openSupportLink}
-            className="ml-auto inline-flex items-center gap-1 text-neutral-500 transition-colors hover:text-accent-300"
+            className={cn('inline-flex items-center gap-1 text-neutral-500 transition-colors hover:text-accent-300', !community && 'ml-auto')}
           >
             <Heart className="h-3 w-3" />
             {support.label ?? 'Support Tenvy'}
@@ -181,7 +191,7 @@ function App() {
         <button
           onClick={() => useUpdater.getState().checkForUpdates(true)}
           title="Check for updates"
-          className={cn('tabular-nums text-neutral-600 hover:text-neutral-300', !support && 'ml-auto')}
+          className={cn('tabular-nums text-neutral-600 hover:text-neutral-300', !support && !community && 'ml-auto')}
         >
           Tenvy · {__APP_VERSION__}
         </button>
