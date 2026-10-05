@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 — 2026-10-05
 
 ### Added
 - The next episode starts by itself: when an episode ends, a 10-second
