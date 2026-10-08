@@ -201,6 +201,10 @@ export const ipc = {
   async restoreBackup(): Promise<RestoreReport | null> {
     return invoke('restore_backup')
   },
+  /** "store": the Microsoft Store version, updated by the Store. */
+  async distribution(): Promise<'store' | 'direct'> {
+    return invoke('distribution')
+  },
   /** Minutes added to every guide time (a guide that runs off). */
   async epgOffset(): Promise<number> {
     return invoke('epg_offset')

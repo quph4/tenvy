@@ -185,7 +185,9 @@ function AboutSection() {
             ? `Downloading ${status.version}…`
             : status.kind === 'error'
               ? `Couldn't check for updates: ${status.message}`
-              : null
+              : status.kind === 'store'
+                ? 'Updates come from the Microsoft Store.'
+                : null
 
   return (
     <div className="border-t border-neutral-800 p-5">
@@ -202,7 +204,7 @@ function AboutSection() {
           >
             Install
           </button>
-        ) : (
+        ) : status.kind === 'store' ? null : (
           <button
             onClick={() => checkForUpdates(true)}
             disabled={status.kind === 'checking' || status.kind === 'downloading'}

@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- Tenvy is coming to the Microsoft Store (as "Tenvy IPTV Player"). The
+  Store version is updated by the Store; the downloaded version keeps
+  updating itself as before.
 - A link to the Tenvy community on Discord, in the bottom bar and under
   Settings → About — for questions, ideas and problems.
 

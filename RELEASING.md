@@ -70,6 +70,26 @@ The first fetches mpv if missing and builds a signed installer; the second
 drafts the release in `quph4/tenvy-releases` (add `-Publish` to publish
 directly).
 
+## Microsoft Store
+
+The Store version is an MSIX package of the same app: Partner Center signs
+and hosts it, and the Store updates it. The app detects that it runs as a
+package (`src-tauri/src/distribution.rs`) and then never updates itself;
+Settings → About says "Updates come from the Microsoft Store".
+
+Product: **Tenvy IPTV Player** (Partner Center, publisher QP Software). The
+identity in `scripts/store/AppxManifest.xml` comes from Product management →
+Product identity and must not change.
+
+For each release, after the GitHub release:
+
+    powershell -ExecutionPolicy Bypass -File scripts/build-msix.ps1
+
+→ `src-tauri/target/msix/Tenvy_<version>_x64.msix`. In Partner Center:
+**Submissions → Update → Packages**, upload it, fill in "What's new"
+(`scripts/store/listing.md` has the rest of the listing), submit.
+Certification takes up to three business days.
+
 ## Website and remote config
 
 `quph4/tenvy-releases` is also the website (GitHub Pages, served from

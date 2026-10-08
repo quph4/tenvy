@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
+import { ipc } from '../lib/ipc'
+import { useToast } from './toast'
 
 /**
  * Self-update via Tauri's updater: signed packages listed in a
@@ -11,6 +13,9 @@ import { relaunch } from '@tauri-apps/plugin-process'
  * A new version is offered in a dialog (UpdatePrompt) — never installed
  * without the user saying so. "Later" asks again the next day; the
  * Update button in the top bar stays meanwhile.
+ *
+ * The Microsoft Store version never updates itself: the Store does that
+ * (status `store`).
  */
 export type UpdateStatus =
   | { kind: 'idle' }
@@ -19,6 +24,8 @@ export type UpdateStatus =
   | { kind: 'available'; version: string; notes: string | null }
   | { kind: 'downloading'; version: string; progress: number | null }
   | { kind: 'error'; message: string }
+  /** The Microsoft Store version: the Store keeps it up to date. */
+  | { kind: 'store' }
 
 interface UpdaterState {
   status: UpdateStatus
@@ -48,6 +55,13 @@ function mayPrompt(version: string): boolean {
 
 let pending: Update | null = null
 
+let storeVersion: Promise<boolean> | null = null
+/** Whether this is the Microsoft Store version (asked once). */
+function isStoreVersion(): Promise<boolean> {
+  storeVersion ??= ipc.distribution().then((d) => d === 'store').catch(() => false)
+  return storeVersion
+}
+
 export const useUpdater = create<UpdaterState>((set, get) => ({
   status: { kind: 'idle' },
   prompt: false,
@@ -69,6 +83,11 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
   async checkForUpdates(manual = false) {
     const s = get().status.kind
     if (s === 'checking' || s === 'downloading') return
+    if (await isStoreVersion()) {
+      set({ status: { kind: 'store' } })
+      if (manual) useToast.getState().push('info', 'Tenvy is kept up to date by the Microsoft Store.')
+      return
+    }
     if (manual) set({ status: { kind: 'checking' } })
     try {
       const update = await check()
@@ -87,7 +106,7 @@ export const useUpdater = create<UpdaterState>((set, get) => ({
   },
 
   async install() {
-    if (!pending) return
+    if (!pending || (await isStoreVersion())) return
     const version = pending.version
     let total: number | null = null
     let received = 0

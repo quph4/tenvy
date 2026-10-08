@@ -941,6 +941,17 @@ pub async fn restore_backup(app: AppHandle, state: State<'_, AppState>) -> Resul
     Ok(Some(report))
 }
 
+/// "store" for the Microsoft Store version (updated by the Store), else
+/// "direct" (the downloaded installer, which updates itself).
+#[tauri::command]
+pub fn distribution() -> &'static str {
+    if crate::distribution::is_store() {
+        "store"
+    } else {
+        "direct"
+    }
+}
+
 /// Minutes added to every guide time (Settings → Guide).
 #[tauri::command]
 pub async fn epg_offset(state: State<'_, AppState>) -> Result<i64> {

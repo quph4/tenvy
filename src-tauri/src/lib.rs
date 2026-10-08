@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod diagnostics;
+mod distribution;
 mod error;
 mod models;
 mod parental;
@@ -56,9 +57,16 @@ fn init_tracing() {
 pub fn run() {
     init_tracing();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The Microsoft Store updates its copy itself; only the direct
+    // download updates itself.
+    let builder = if distribution::is_store() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_updater::Builder::new().build())
+    };
+    builder
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -115,6 +123,7 @@ pub fn run() {
             commands::programmes_for_channels,
             commands::now_playing,
             commands::epg_offset,
+            commands::distribution,
             commands::export_backup,
             commands::restore_backup,
             commands::parental_words,
