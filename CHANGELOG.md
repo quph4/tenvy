@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.4 — 2026-10-08
 
 ### Added
 - Tenvy is coming to the Microsoft Store (as "Tenvy IPTV Player"). The
