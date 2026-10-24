@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Added
+- **Tenvy is open source**, under the GNU GPL v3 or later:
+  https://github.com/quph4/tenvy. Settings → About links to the source
+  code, and "Report a problem" opens a bug report form there.
 - The Microsoft Store version asks, once after a few days of use (and at
   most once more a month later), whether you'd rate Tenvy in the Store.
   Never during fullscreen or the mini player, and never again after

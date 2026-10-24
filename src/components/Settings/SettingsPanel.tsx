@@ -142,29 +142,11 @@ export function SettingsPanel() {
   )
 }
 
-/** A new GitHub issue with a short template (no personal data in the URL). */
-const REPORT_BODY = [
-  '**What happened?**',
-  '',
-  '',
-  '**What did you expect?**',
-  '',
-  '',
-  '**Steps to get there**',
-  '1. ',
-  '',
-  `**Tenvy version:** ${__APP_VERSION__}`,
-  '',
-  '**Diagnostics** (Settings → About → Copy diagnostics, then paste here):',
-  '```',
-  '',
-  '```',
-].join('\n')
-const REPORT_URL =
-  'https://github.com/quph4/tenvy-releases/issues/new?title=' +
-  encodeURIComponent('Problem: ') +
-  '&body=' +
-  encodeURIComponent(REPORT_BODY)
+/** Tenvy's source code (GPL-3.0-or-later). */
+const SOURCE_URL = 'https://github.com/quph4/tenvy'
+/** A new bug report from the issue template, with the version filled in
+ *  (no personal data in the URL). */
+const REPORT_URL = `${SOURCE_URL}/issues/new?template=bug_report.yml&version=${encodeURIComponent(__APP_VERSION__)}`
 
 function AboutSection() {
   const push = useToast((s) => s.push)
@@ -251,6 +233,9 @@ function AboutSection() {
       <div className="mt-3 flex gap-4 text-[11px]">
         <button onClick={() => ipc.openLicenses().catch(() => {})} className="text-neutral-500 hover:text-neutral-300">
           Open-source licenses
+        </button>
+        <button onClick={() => openUrl(SOURCE_URL).catch(() => {})} className="text-neutral-500 hover:text-neutral-300">
+          Source code
         </button>
         <button
           onClick={() => openUrl('https://quph4.github.io/tenvy-releases/privacy.html').catch(() => {})}

@@ -3,7 +3,7 @@ name = "tenvy"
 version = "0.1.4"
 description = "Desktop IPTV player with EPG, watch history, and embedded mpv."
 authors = ["Tenvy"]
-license = "LicenseRef-Proprietary"
+license = "GPL-3.0-or-later"
 edition = "2021"
 publish = false
 

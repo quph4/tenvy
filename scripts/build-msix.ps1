@@ -21,7 +21,12 @@ if (-not $sdk) { throw 'Windows SDK not found (makeappx.exe). Install the Window
 $makeappx = Join-Path $sdk.FullName 'x64\makeappx.exe'
 $makepri = Join-Path $sdk.FullName 'x64\makepri.exe'
 
+$release = Join-Path $root 'src-tauri\target\release'
 if (-not $SkipBuild) {
+  # The build copies resources but never deletes old ones; start the
+  # licenses folder clean so a renamed license file can't linger in the package.
+  $oldLicenses = Join-Path $release 'licenses'
+  if (Test-Path $oldLicenses) { Remove-Item -Recurse -Force $oldLicenses }
   Push-Location $root
   try {
     pnpm tauri build --no-bundle
@@ -29,7 +34,6 @@ if (-not $SkipBuild) {
   } finally { Pop-Location }
 }
 
-$release = Join-Path $root 'src-tauri\target\release'
 $out = Join-Path $root 'src-tauri\target\msix'
 $layout = Join-Path $out 'layout'
 if (Test-Path $layout) { Remove-Item -Recurse -Force $layout }

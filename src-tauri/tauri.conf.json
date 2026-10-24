@@ -36,7 +36,7 @@
       "nsis"
     ],
     "publisher": "Tenvy",
-    "copyright": "Copyright © 2026 Tenvy. All rights reserved.",
+    "copyright": "Copyright © 2026 QP Software. Free software under the GNU GPL v3 or later.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -50,7 +50,7 @@
     "resources": {
       "resources/mpv/": "mpv/",
       "licenses/": "licenses/",
-      "../LICENSE": "licenses/Tenvy-EULA.txt",
+      "../LICENSE": "licenses/Tenvy-LICENSE.txt",
       "../THIRD_PARTY_NOTICES.md": "licenses/THIRD_PARTY_NOTICES.md"
     },
     "windows": {
