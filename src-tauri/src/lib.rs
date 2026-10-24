@@ -124,6 +124,7 @@ pub fn run() {
             commands::now_playing,
             commands::epg_offset,
             commands::distribution,
+            commands::open_store_review,
             commands::export_backup,
             commands::restore_backup,
             commands::parental_words,

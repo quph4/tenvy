@@ -201,6 +201,10 @@ export const ipc = {
   async restoreBackup(): Promise<RestoreReport | null> {
     return invoke('restore_backup')
   },
+  /** Open the Microsoft Store's rating dialog for Tenvy. */
+  async openStoreReview(): Promise<void> {
+    return invoke('open_store_review')
+  },
   /** "store": the Microsoft Store version, updated by the Store. */
   async distribution(): Promise<'store' | 'direct'> {
     return invoke('distribution')

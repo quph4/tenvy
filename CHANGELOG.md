@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- The Microsoft Store version asks, once after a few days of use (and at
+  most once more a month later), whether you'd rate Tenvy in the Store.
+  Never during fullscreen or the mini player, and never again after
+  you've rated it.
+
 ## 0.1.4 — 2026-10-08
 
 ### Added

@@ -55,6 +55,45 @@ export const tests = [
       }),
   },
   {
+    name: 'Store rating: asked after some days of use, at most twice, never after rating',
+    run: (ctx) =>
+      ctx.page(async (t) => {
+        const m = await import('/src/stores/appInfo.ts')
+        const day = 86400
+        const now = 1_800_000_000
+        const base = { store: true, installedAt: now - 6 * day, now, watched: true, busy: false, record: null }
+        const cases = [
+          ['first time, after a few days', base, true],
+          ['installer version', { ...base, store: false }, false],
+          ['only two days in', { ...base, installedAt: now - 2 * day }, false],
+          ['nothing watched yet', { ...base, watched: false }, false],
+          ['fullscreen or mini player', { ...base, busy: true }, false],
+          ['asked ten days ago', { ...base, record: { asked: 1, at: now - 10 * day, rated: false } }, false],
+          ['asked a month ago', { ...base, record: { asked: 1, at: now - 31 * day, rated: false } }, true],
+          ['already rated', { ...base, record: { asked: 1, at: now - 31 * day, rated: true } }, false],
+          ['asked twice', { ...base, record: { asked: 2, at: now - 90 * day, rated: false } }, false],
+        ]
+        const wrong = cases.filter(([, o, want]) => m.shouldAskForRating(o) !== want).map(([label]) => label)
+        if (wrong.length) throw new Error(`wrong decision: ${wrong.join(', ')}`)
+
+        // The request itself: a notice with a Rate button (not clicked: it opens the Store).
+        const { useToast } = await import('/src/stores/toast.ts')
+        try {
+          m.askForRating()
+          const toast = await t.until(
+            () => useToast.getState().items.find((x) => x.message.includes('rating in the Microsoft Store')),
+            'rating notice',
+          )
+          if (toast.action?.label !== 'Rate Tenvy') throw new Error(`button: ${toast.action?.label}`)
+          const saved = JSON.parse(localStorage.getItem('tenvy.storeRating'))
+          if (saved?.asked !== 1 || saved.rated) throw new Error(`recorded: ${JSON.stringify(saved)}`)
+          useToast.getState().dismiss(toast.id)
+        } finally {
+          localStorage.removeItem('tenvy.storeRating')
+        }
+      }),
+  },
+  {
     name: 'Live: click a channel, it plays (sound muted)',
     run: (ctx) =>
       ctx.page(async (t) => {

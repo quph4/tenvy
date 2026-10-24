@@ -463,6 +463,20 @@ pub async fn open_licenses(app: AppHandle) -> Result<()> {
         .map_err(|e| err!("couldn't open the licenses folder: {e}"))
 }
 
+/// The Microsoft Store's product id for Tenvy (Partner Center).
+const STORE_PRODUCT_ID: &str = "9PMCC6XN52D2";
+
+/// Open the Microsoft Store's rating dialog for Tenvy. Opened from here
+/// rather than the webview, so the frontend needs no permission for the
+/// `ms-windows-store:` scheme.
+#[tauri::command]
+pub async fn open_store_review(app: AppHandle) -> Result<()> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(format!("ms-windows-store://review/?ProductId={STORE_PRODUCT_ID}"), None::<&str>)
+        .map_err(|e| err!("couldn't open the Microsoft Store: {e}"))
+}
+
 /// Text report for problem reports; see diagnostics.rs.
 #[tauri::command]
 pub async fn diagnostics(app: AppHandle, state: State<'_, AppState>) -> Result<String> {

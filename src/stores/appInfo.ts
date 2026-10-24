@@ -47,6 +47,7 @@ const PROMPT_DELAY_MS = 3 * 60 * 1000
 
 const SEEN_KEY = 'tenvy.seenAnnouncements'
 const PROMPTED_KEY = 'tenvy.supportPromptAt'
+const RATING_KEY = 'tenvy.storeRating'
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -109,12 +110,83 @@ function maybeAskForSupport() {
   )
 }
 
+// ---- Microsoft Store rating ----
+
+/** Days of use before asking for a rating, and before the one reminder. */
+const RATE_AFTER_DAYS = 5
+const RATE_AGAIN_DAYS = 30
+
+/** What happened with earlier rating requests (epoch seconds). */
+export interface RatingRecord {
+  asked: number
+  at: number
+  rated: boolean
+}
+
+/**
+ * Whether to ask for a Store rating now: only the Store version (ratings
+ * there decide how visible Tenvy is in the Store), after some days of
+ * real use, never while watching fullscreen or in the mini player — and
+ * at most twice, a month apart, never again once they've rated.
+ */
+export function shouldAskForRating(o: {
+  store: boolean
+  installedAt: number
+  now: number
+  watched: boolean
+  busy: boolean
+  record: RatingRecord | null
+}): boolean {
+  if (!o.store || !o.watched || o.busy) return false
+  if (o.now - o.installedAt < RATE_AFTER_DAYS * DAY) return false
+  const r = o.record
+  if (!r) return true
+  if (r.rated || r.asked >= 2) return false
+  return o.now - r.at >= RATE_AGAIN_DAYS * DAY
+}
+
+/** The request: a notice whose button opens the Store's rating dialog. */
+export function askForRating(now = Math.floor(Date.now() / 1000)) {
+  const prev = readJson<RatingRecord | null>(RATING_KEY, null)
+  const record: RatingRecord = { asked: (prev?.asked ?? 0) + 1, at: now, rated: false }
+  writeJson(RATING_KEY, record)
+  useToast.getState().push('support', 'Enjoying Tenvy? A rating in the Microsoft Store helps other people find it.', {
+    duration: 45_000,
+    action: {
+      label: 'Rate Tenvy',
+      run: () => {
+        writeJson(RATING_KEY, { ...record, rated: true })
+        ipc.openStoreReview().catch(() => {})
+      },
+    },
+  })
+}
+
+/** True if it asked (then the support prompt waits for another day). */
+async function maybeAskForRating(): Promise<boolean> {
+  const info = useAppInfo.getState().info
+  if (!info) return false
+  const store = (await ipc.distribution().catch(() => 'direct')) === 'store'
+  const pb = usePlayback.getState()
+  const ask = shouldAskForRating({
+    store,
+    installedAt: info.installedAt,
+    now: Date.now() / 1000,
+    watched: useHistory.getState().progress.size > 0,
+    busy: pb.fullscreen || pb.mini,
+    record: readJson<RatingRecord | null>(RATING_KEY, null),
+  })
+  if (ask) askForRating()
+  return ask
+}
+
 /** Call once from App; returns a cleanup. */
 export function startAppInfo(): () => void {
   const load = useAppInfo.getState().load
   const timers = [
     setTimeout(() => load().then(() => setTimeout(showAnnouncements, ANNOUNCE_DELAY_MS)), 0),
-    setTimeout(maybeAskForSupport, PROMPT_DELAY_MS),
+    // One request per session at most: a Store rating first, else support.
+    setTimeout(() => maybeAskForRating().then((asked) => asked || maybeAskForSupport()), PROMPT_DELAY_MS),
   ]
   const interval = setInterval(() => load().then(showAnnouncements), RELOAD_MS)
   return () => {
