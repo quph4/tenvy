@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 — 2026-10-26
 
 ### Added
 - **Tenvy is open source**, under the GNU GPL v3 or later:
