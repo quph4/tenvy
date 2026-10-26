@@ -19,6 +19,7 @@ SITE = 'https://quph4.github.io/tenvy-releases/'
 STORE = 'https://apps.microsoft.com/detail/9PMCC6XN52D2?mode=direct'
 INSTALLER = 'https://github.com/quph4/tenvy-releases/releases/latest'
 DISCORD = 'https://discord.gg/WxShS8pgzR'
+SOURCE = 'https://github.com/quph4/tenvy'
 UPDATED = '12 October 2026'
 
 # ---------------------------------------------------------------- content
@@ -55,7 +56,7 @@ PAGES = [
 <p>Tenvy works with the same details you use in TiviMate: an <b>Xtream Codes</b> login (server, username and password) or an <b>M3U playlist</b> link. Paste it on Tenvy's first screen and your channels, guide, films and series load by themselves.</p>
 ''',
         faq=[
-            ('Is Tenvy free?', 'Yes. No ads, no account, no paid version. If you like it you can support it with a tip, but it\'s entirely optional.'),
+            ('Is Tenvy free?', 'Yes, and open source: the code is public on <a href="{SOURCE}">GitHub</a> under the GPL. No ads, no account, no paid version. If you like it you can support it with a tip, but it\'s entirely optional.'),
             ('Does Tenvy include channels?', 'No. Like TiviMate, Tenvy is a player only. You need your own IPTV subscription, and should only use services you have the right to watch.'),
             ('Can I move my TiviMate favorites over?', 'Not automatically — TiviMate keeps them on your Android device. Adding favorites in Tenvy takes a right-click per channel.'),
         ],
@@ -273,9 +274,8 @@ def page(p: dict) -> str:
     home = up or './'
     url = SITE + p['slug'] + '.html'
     body = p['body'].replace('{STORE}', STORE).replace('{INSTALLER}', INSTALLER).replace('{DISCORD}', DISCORD)
-    faq = ''.join(
-        f'<details><summary>{html.escape(q)}</summary><p>{a}</p></details>' for q, a in p['faq']
-    )
+    faq_items = [(q, a.replace('{SOURCE}', SOURCE)) for q, a in p['faq']]
+    faq = ''.join(f'<details><summary>{html.escape(q)}</summary><p>{a}</p></details>' for q, a in faq_items)
     others = ''.join(
         f'<li><a href="{up}{slug}.html">{html.escape(title)}</a></li>'
         for slug, title in LINK_TITLES.items()
@@ -288,7 +288,7 @@ def page(p: dict) -> str:
         '@type': 'FAQPage',
         'mainEntity': [
             {'@type': 'Question', 'name': q, 'acceptedAnswer': {'@type': 'Answer', 'text': html.unescape(a)}}
-            for q, a in p['faq']
+            for q, a in faq_items
         ],
     }, ensure_ascii=False)
     return f'''<!doctype html>
@@ -323,7 +323,7 @@ def page(p: dict) -> str:
 {body}
     <div class="cta">
       <h2>Try Tenvy — it's free</h2>
-      <p>No ads, no account. Windows 10 and 11.</p>
+      <p>Free and open source. No ads, no account. Windows 10 and 11.</p>
       <div class="row">
         <a class="btn btn-gold" href="{STORE}">Get it from Microsoft Store</a>
         <a class="btn btn-ghost" href="{INSTALLER}">Download installer</a>
@@ -340,7 +340,7 @@ def page(p: dict) -> str:
   </div>
 </main>
 <footer><div class="wrap">
-  <nav><a href="{home}">Tenvy</a><a href="{home}#faq">FAQ</a><a href="{up}privacy.html">Privacy</a><a href="{DISCORD}">Discord</a></nav>
+  <nav><a href="{home}">Tenvy</a><a href="{home}#faq">FAQ</a><a href="{up}privacy.html">Privacy</a><a href="{SOURCE}">Source code</a><a href="{DISCORD}">Discord</a></nav>
   Tenvy is a media player and does not provide any content. Use it only with services and streams you have the right to watch.
 </div></footer>
 </body>
